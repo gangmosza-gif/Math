@@ -4,20 +4,30 @@ import JSZip from 'jszip';
 import { ensureFonts, fontsInJSON, fontCssUrl, FONT_NAMES } from './fonts.js';
 
 /** Render one page (serialized JSON string) to an offscreen fabric canvas. */
-export async function renderPage(design, pageJSON, { transparent = false, forceBg = null } = {}) {
+export async function renderPage(design, pageJSON, { transparent = false, forceBg = null, bleed = 0 } = {}) {
   const json = typeof pageJSON === 'string' ? JSON.parse(pageJSON) : pageJSON;
   await ensureFonts(fontsInJSON(json));
   const el = document.createElement('canvas');
-  const sc = new StaticCanvas(el, { width: design.width, height: design.height, enableRetinaScaling: false, renderOnAddRemove: false });
+  const sc = new StaticCanvas(el, { width: design.width + bleed * 2, height: design.height + bleed * 2, enableRetinaScaling: false, renderOnAddRemove: false });
   await sc.loadFromJSON(json);
+  if (bleed) {
+    // extend the page by `bleed` px on each side (print bleed)
+    sc.viewportTransform = [1, 0, 0, 1, bleed, bleed];
+    sc.backgroundVpt = false;
+    const bi = sc.backgroundImage;
+    if (bi) {
+      const k = Math.max((design.width + bleed * 2) / bi.width, (design.height + bleed * 2) / bi.height);
+      bi.set({ scaleX: k, scaleY: k, originX: 'left', originY: 'top', left: (design.width + bleed * 2 - bi.width * k) / 2, top: (design.height + bleed * 2 - bi.height * k) / 2 });
+    }
+  }
   if (transparent) sc.backgroundColor = '';
   else if (!sc.backgroundColor && forceBg) sc.backgroundColor = forceBg;
   sc.renderAll();
   return sc;
 }
 
-export async function pageToDataURL(design, pageJSON, { format = 'png', multiplier = 1, quality = 0.92, transparent = false } = {}) {
-  const sc = await renderPage(design, pageJSON, { transparent: transparent && format === 'png', forceBg: format === 'png' ? null : '#ffffff' });
+export async function pageToDataURL(design, pageJSON, { format = 'png', multiplier = 1, quality = 0.92, transparent = false, bleed = 0 } = {}) {
+  const sc = await renderPage(design, pageJSON, { transparent: transparent && format === 'png', forceBg: format === 'png' ? null : '#ffffff', bleed });
   const url = sc.toDataURL({ format, multiplier, quality, enableRetinaScaling: false });
   sc.dispose();
   return url;
@@ -70,6 +80,25 @@ export async function exportDesign(design, opts) {
     const blob = new Blob([JSON.stringify({ app: 'lai-studio', version: 1, design })], { type: 'application/json' });
     return downloadBlob(blob, `${name}.lai.json`);
   }
+
+  if (format === 'pptx') {
+    const { default: PptxGenJS } = await import('pptxgenjs');
+    const pptx = new PptxGenJS();
+    const wIn = design.width / 96, hIn = design.height / 96;
+    const k = Math.min(1, 13.33 / Math.max(wIn, hIn) * 1.0);
+    pptx.defineLayout({ name: 'LAI', width: Math.max(1, wIn * k), height: Math.max(1, hIn * k) });
+    pptx.layout = 'LAI';
+    for (let n = 0; n < list.length; n++) {
+      onProgress(n, list.length);
+      const url = await pageToDataURL(design, list[n].page.json, { format: 'png', multiplier: Math.max(1, scale) });
+      pptx.addSlide().addImage({ data: url, x: 0, y: 0, w: wIn * k, h: hIn * k });
+    }
+    onProgress(list.length, list.length);
+    const blob = await pptx.write({ outputType: 'blob' });
+    return downloadBlob(blob, `${name}.pptx`);
+  }
+
+  if (format === 'pdf' && opts.print) return exportPrintPDF(design, list, name, onProgress);
 
   if (format === 'pdf') {
     const mm = design.mm;
@@ -132,4 +161,31 @@ export async function printDesign(design) {
 /** Small thumbnail data URL for a page. */
 export async function pageThumb(design, pageJSON, width = 240) {
   return pageToDataURL(design, pageJSON, { format: 'jpeg', multiplier: width / design.width, quality: 0.8 });
+}
+
+/** Print-ready PDF: 300 dpi, 3 mm bleed and crop marks. */
+async function exportPrintPDF(design, list, name, onProgress) {
+  const pxPerMM = design.mm ? design.width / design.mm[0] : 96 / 25.4;
+  const tw = design.mm ? design.mm[0] : design.width / pxPerMM;
+  const th = design.mm ? design.mm[1] : design.height / pxPerMM;
+  const bleedMM = 3, slugMM = 8;
+  const pw = tw + 2 * (bleedMM + slugMM), ph = th + 2 * (bleedMM + slugMM);
+  const orientation = pw > ph ? 'landscape' : 'portrait';
+  const pdf = new jsPDF({ orientation, unit: 'mm', format: [pw, ph], compress: true });
+  const multiplier = Math.max(1, (300 / 25.4) / pxPerMM);
+  for (let k = 0; k < list.length; k++) {
+    onProgress(k, list.length);
+    if (k > 0) pdf.addPage([pw, ph], orientation);
+    const url = await pageToDataURL(design, list[k].page.json, { format: 'jpeg', multiplier, quality: 0.95, bleed: Math.round(bleedMM * pxPerMM) });
+    pdf.addImage(url, 'JPEG', slugMM, slugMM, tw + 2 * bleedMM, th + 2 * bleedMM, undefined, 'FAST');
+    // crop marks at the trim edges, drawn in the slug area
+    pdf.setDrawColor(0);
+    pdf.setLineWidth(0.25);
+    const x0 = slugMM + bleedMM, y0 = slugMM + bleedMM, x1 = x0 + tw, y1 = y0 + th;
+    const len = slugMM - 1.5;
+    for (const x of [x0, x1]) { pdf.line(x, 0.5, x, 0.5 + len); pdf.line(x, ph - 0.5 - len, x, ph - 0.5); }
+    for (const y of [y0, y1]) { pdf.line(0.5, y, 0.5 + len, y); pdf.line(pw - 0.5 - len, y, pw - 0.5, y); }
+  }
+  onProgress(list.length, list.length);
+  return downloadBlob(pdf.output('blob'), `${name}-print.pdf`);
 }

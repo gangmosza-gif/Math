@@ -38,7 +38,8 @@ export function modal({ title, body, wide = false, onClose }) {
   };
   const onKey = (e) => {
     if (e.key === 'Escape') {
-      e.stopPropagation();
+      e.preventDefault();
+      e.stopImmediatePropagation();
       close();
     }
   };
@@ -97,6 +98,7 @@ export function promptDialog(title, value = '') {
 let pop = null;
 export function closePopover() {
   if (pop) {
+    clearTimeout(pop.timer);
     pop.el.remove();
     document.removeEventListener('mousedown', pop.outside, true);
     document.removeEventListener('keydown', pop.key, true);
@@ -125,17 +127,19 @@ export function popover(anchor, html, { key, className = '', onClose, align = 'l
   el.style.left = left + 'px';
   el.style.top = top + 'px';
   const outside = (e) => {
+    if (!pop || pop.el !== el) return document.removeEventListener('mousedown', outside, true);
     if (!el.contains(e.target) && !anchor.contains(e.target)) closePopover();
   };
   const keyH = (e) => {
     if (e.key === 'Escape') {
-      e.stopPropagation();
+      e.preventDefault();
+      e.stopImmediatePropagation();
       closePopover();
     }
   };
-  setTimeout(() => document.addEventListener('mousedown', outside, true));
+  const timer = setTimeout(() => document.addEventListener('mousedown', outside, true));
   document.addEventListener('keydown', keyH, true);
-  pop = { el, outside, key: keyH, id: key, onClose };
+  pop = { el, outside, key: keyH, id: key, onClose, timer };
   return el;
 }
 export function currentPopoverId() {

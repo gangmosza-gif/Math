@@ -10,6 +10,11 @@ import { TEMPLATES, buildTemplate, templateFonts, pageGradient } from './templat
 import { exportDesign, printDesign, pageThumb, renderPage } from './export.js';
 import { saveDesign, listUploads, saveUpload, deleteUpload, uid } from './storage.js';
 import { PRESETS } from './presets.js';
+import { fileToDataURL } from './imageutil.js';
+import { features, SMART_LABEL } from './features.js';
+import { FRAMES, GRIDS } from './smart.js';
+
+export { fileToDataURL };
 
 config.textureSize = 4096;
 
@@ -25,7 +30,7 @@ Object.assign(InteractiveFabricObject.ownDefaults, {
   padding: 2,
 });
 
-const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask'];
+const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder'];
 export const BLANK_PAGE = (bg = '#ffffff') => JSON.stringify({ version: '6.9.1', objects: [], background: bg });
 
 const COLORS = [
@@ -69,31 +74,6 @@ function objGradient([a, b]) {
   });
 }
 
-/** Downscale an uploaded image file to a reasonable data URL. */
-export function fileToDataURL(file, max = 2048) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onerror = reject;
-    fr.onload = () => {
-      if (file.type === 'image/svg+xml' || file.type === 'image/gif') return resolve({ url: fr.result });
-      const img = new Image();
-      img.onerror = reject;
-      img.onload = () => {
-        const k = Math.min(1, max / Math.max(img.width, img.height));
-        if (k === 1 && fr.result.length < 3e6) return resolve({ url: fr.result, w: img.width, h: img.height });
-        const c = document.createElement('canvas');
-        c.width = Math.round(img.width * k);
-        c.height = Math.round(img.height * k);
-        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-        const png = file.type === 'image/png' || file.type === 'image/webp';
-        resolve({ url: c.toDataURL(png ? 'image/png' : 'image/jpeg', 0.9), w: c.width, h: c.height });
-      };
-      img.src = fr.result;
-    };
-    fr.readAsDataURL(file);
-  });
-}
-
 export class Editor {
   constructor(root, design, { onExit }) {
     this.root = root;
@@ -133,6 +113,7 @@ export class Editor {
           <span class="save-status" data-status></span>
           <div class="grow"></div>
           <input class="name-input" data-name value="${esc(this.design.name)}" aria-label="ชื่องานออกแบบ" />
+          <button class="tb-btn hide-sm" data-act="present" title="นำเสนอแบบเต็มจอ">▶ นำเสนอ</button>
           <button class="icon-btn hide-sm" data-act="print" title="พิมพ์">${icon('print')}</button>
           <button class="btn primary" data-act="export">${icon('download', 18)}<span class="hide-xs"> ดาวน์โหลด</span></button>
         </header>
@@ -190,6 +171,7 @@ export class Editor {
     this.bindCanvas();
     this.bindUI();
     this.bindKeys();
+    this.bindPanelDrag();
 
     // generate thumbnails of all pages in background
     await this.loadPage(0, { fit: true });
@@ -219,8 +201,8 @@ export class Editor {
   bindCanvas() {
     const c = this.canvas;
     const sel = () => { this.renderCtx(); if (this.panel === 'layers') this.renderPanel(); };
-    c.on('selection:created', () => { closePopover(); sel(); });
-    c.on('selection:updated', () => { closePopover(); sel(); });
+    c.on('selection:created', () => { closePopover(); if (this._style) this.maybePasteStyle(); sel(); });
+    c.on('selection:updated', () => { closePopover(); if (this._style) this.maybePasteStyle(); sel(); });
     c.on('selection:cleared', () => { if (currentPopoverId() !== 'color-bg') closePopover(); sel(); });
     c.on('object:modified', (e) => {
       const t = e.target;
@@ -244,12 +226,16 @@ export class Editor {
       e.path.set({ name: this.drawSettings.mode === 'highlighter' ? 'ปากกาไฮไลต์' : 'ลายเส้น' });
       this.commit();
     });
-    c.on('after:render', ({ ctx }) => this.drawGuides(ctx));
+    c.on('after:render', ({ ctx }) => { this.drawMargins(ctx); this.drawGuides(ctx); });
     c.on('mouse:down', (e) => {
       if (e.e.button === 2) this.showContextMenu(e);
     });
     c.on('mouse:dblclick', (e) => {
-      if (isImage(e.target) && !e.target.locked) this.openImagePopover('crop');
+      const t = e.target;
+      if (!t || t.locked) return;
+      if (t.smart) this.openSmartEditor(t);
+      else if (isImage(t) && t.placeholder) this.pickReplaceImage();
+      else if (isImage(t)) this.openImagePopover('crop');
     });
   }
 
@@ -594,8 +580,17 @@ export class Editor {
     ws.addEventListener('drop', (e) => {
       e.preventDefault();
       ws.classList.remove('drop');
+      const act = e.dataTransfer?.getData('application/x-lai-act');
+      if (act) return this.dropAct(act, e);
       const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/'));
-      if (files.length) this.handleFiles(files, true);
+      if (!files.length) return;
+      const target = files.length === 1 ? this.imageAt(this.canvas.getScenePoint(e)) : null;
+      if (target) {
+        fileToDataURL(files[0]).then(async ({ url }) => {
+          await saveUpload({ id: uid(), url, name: files[0].name, createdAt: Date.now() });
+          this.replaceImage(target, url);
+        });
+      } else this.handleFiles(files, true);
     });
     ws.addEventListener('wheel', (e) => {
       if (e.ctrlKey || e.metaKey) {
@@ -652,7 +647,7 @@ export class Editor {
   bindKeys() {
     this.on(document, 'keydown', (e) => {
       const t = e.target;
-      if (document.querySelector('.modal-back')) return;
+      if (e.defaultPrevented || document.querySelector('.modal-back, .present')) return;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       const a = this.canvas.getActiveObject();
       if (a && a.isEditing) return;
@@ -670,7 +665,7 @@ export class Editor {
       if (mod && k === '-') { e.preventDefault(); return this.setZoom(this.zoom / 1.15); }
       if (mod && k === '0') { e.preventDefault(); return this.fitZoom(); }
       if (k === 'delete' || k === 'backspace') { if (a) { e.preventDefault(); this.deleteSelection(); } return; }
-      if (k === 'escape') { this.canvas.discardActiveObject(); this.canvas.requestRenderAll(); return; }
+      if (k === 'escape') { if (this._style) { this._style = null; this.$('[data-ws]').classList.remove('paint'); } this.canvas.discardActiveObject(); this.canvas.requestRenderAll(); return; }
       if (!mod && k === 't') { e.preventDefault(); return this.addText('body'); }
       if (!mod && k === 'r') { e.preventDefault(); return this.addShape(0); }
       if (!mod && k === 'c' && !a) { e.preventDefault(); return this.addShape(2); }
@@ -696,6 +691,7 @@ export class Editor {
       case 'redo': return this.redo();
       case 'export': return this.openExport();
       case 'print': toast('กำลังเตรียมพิมพ์…'); return printDesign(this.design);
+      case 'present': return this.present();
       case 'resize': return this.openResize();
       case 'file-menu': return this.openFileMenu(btn);
       case 'close-panel': return this.openPanel(null);
@@ -725,6 +721,8 @@ export class Editor {
         <button data-m="export">${icon('file', 18)} ดาวน์โหลดเป็น PNG / JPG / PDF / SVG</button>
         <button data-m="print">${icon('print', 18)} พิมพ์</button>
         <hr>
+        <button data-m="present">▶ นำเสนอแบบเต็มจอ</button>
+        <button data-m="margins">📐 ${this.showMargins ? 'ซ่อน' : 'แสดง'}ระยะขอบปลอดภัย</button>
         <button data-m="shortcuts">⌨️ ปุ่มลัดคีย์บอร์ด</button>
       </div>`, { key: 'file' });
     el.onclick = async (e) => {
@@ -739,6 +737,8 @@ export class Editor {
       if (m === 'export') this.openExport();
       if (m === 'print') printDesign(this.design);
       if (m === 'shortcuts') this.showShortcuts();
+      if (m === 'present') this.present();
+      if (m === 'margins') this.toggleMargins();
     };
   }
 
@@ -769,6 +769,7 @@ export class Editor {
 
   displayName(o) {
     if (isText(o)) return (o.text || '').replace(/\s+/g, ' ').slice(0, 28) || 'ข้อความ';
+    if (o.smart) return SMART_LABEL[o.smart.type] || o.name;
     return o.name || this.defaultName(o);
   }
 
@@ -1025,6 +1026,7 @@ export class Editor {
     if (a.type === 'activeselection') return 'multi';
     if (a.locked) return 'locked';
     if (isText(a)) return 'text';
+    if (a.smart) return 'smart';
     if (isImage(a)) return 'image';
     if (a.type === 'group') return 'group';
     if (isLineLike(a)) return 'line';
@@ -1040,6 +1042,7 @@ export class Editor {
     const btn = (act, ic, title, active = false, label = '') => `<button class="tool ${active ? 'on' : ''}" data-act="${act}" title="${title}">${icon(ic, 18)}${label ? `<span>${label}</span>` : ''}</button>`;
     const common = () => `
       <span class="grow"></span>
+      ${a && a.type !== 'activeselection' ? btn('copy-style', 'paint', 'คัดลอกสไตล์ แล้วคลิกวัตถุอื่นเพื่อวาง') : ''}
       ${btn('pop:opacity', 'opacity', 'ความโปร่งใส')}
       ${btn('pop:position', 'position', 'ตำแหน่ง', false, 'ตำแหน่ง')}
       ${btn('duplicate', 'copy', 'ทำสำเนา (Ctrl+D)')}
@@ -1057,6 +1060,13 @@ export class Editor {
     } else if (kind === 'multi') {
       html = `${btn('group', 'group', 'จัดกลุ่ม (Ctrl+G)', false, 'จัดกลุ่ม')}
         ${btn('align:left', 'alignLeft', 'ชิดซ้าย')}${btn('align:center', 'alignCenter', 'กึ่งกลางแนวนอน')}${btn('align:right', 'alignRight', 'ชิดขวา')}
+        ${btn('align:top', 'alignTop', 'ชิดบน')}${btn('align:middle', 'alignMiddle', 'กึ่งกลางแนวตั้ง')}${btn('align:bottom', 'alignBottom', 'ชิดล่าง')}
+        ${btn('distribute:h', 'distH', 'เว้นระยะแนวนอนเท่ากัน')}${btn('distribute:v', 'distV', 'เว้นระยะแนวตั้งเท่ากัน')}
+        ${common()}`;
+    } else if (kind === 'smart') {
+      const label = SMART_LABEL[a.smart.type] || 'องค์ประกอบ';
+      html = `<button class="btn sm primary-soft" data-act="smart-edit">${icon('pen', 16)} แก้ไข${label}</button>
+        ${btn('pop:effects', 'effects', 'เงา', false, 'เอฟเฟกต์')}
         ${common()}`;
     } else if (kind === 'group') {
       html = `${btn('ungroup', 'ungroup', 'ยกเลิกกลุ่ม (Ctrl+Shift+G)', false, 'ยกเลิกกลุ่ม')}
@@ -1079,11 +1089,13 @@ export class Editor {
         ${btn('toggle:linethrough', 'strike', 'ขีดฆ่า', a.linethrough)}
         ${btn('text-align', alignIc, 'จัดตำแหน่งข้อความ')}
         ${btn('text-case', 'case', 'ตัวพิมพ์ใหญ่/เล็ก')}
+        ${btn('list', 'list', 'รายการแบบจุด/ตัวเลข', !!a.listType)}
         ${btn('pop:spacing', 'spacing', 'ระยะห่าง')}
         ${btn('pop:effects', 'effects', 'เอฟเฟกต์', false, 'เอฟเฟกต์')}
         ${common()}`;
     } else if (kind === 'image') {
       html = `
+        ${btn('replace-img', 'replace', 'แทนที่รูป (คงขนาดและกรอบเดิม)', false, 'แทนที่รูป')}
         ${btn('pop:adjust', 'adjust', 'ปรับแต่งรูป', false, 'ปรับแต่ง')}
         ${btn('pop:crop', 'crop', 'ครอบตัด', false, 'ครอบตัด')}
         ${btn('pop:mask', 'border', 'รูปทรงกรอบ', false, 'กรอบ')}
@@ -1134,6 +1146,11 @@ export class Editor {
       case 'color': return this.openColorPopover(btn, arg);
       case 'pop': return this.openPop(arg, btn);
       case 'duplicate': return this.duplicate();
+      case 'smart-edit': return this.openSmartEditor();
+      case 'replace-img': return this.pickReplaceImage();
+      case 'list': return this.toggleList();
+      case 'distribute': return this.distribute(arg);
+      case 'copy-style': return this.copyStyle();
       case 'delete': return this.deleteSelection();
       case 'lock': return this.toggleLock();
       case 'group': return this.group();
@@ -1190,6 +1207,8 @@ export class Editor {
     const docColors = this.documentColors();
     const el = popover(btn, `
       <div class="color-pop">
+        <div class="cp-title">ชุดสีแบรนด์ของฉัน <button class="link" data-brand-clear ${this.brandColors().length ? '' : 'hidden'}>ล้าง</button></div>
+        <div class="swatches">${this.brandColors().map((c) => `<button class="sw" data-c="${c}" style="background:${c}" title="${c}"></button>`).join('')}<button class="sw add" data-brand-add title="เพิ่มสีที่เลือกอยู่ลงชุดสีแบรนด์">+</button></div>
         ${docColors.length ? `<div class="cp-title">สีในงานนี้</div><div class="swatches">${docColors.map((c) => `<button class="sw" data-c="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div>` : ''}
         <div class="cp-title">สีพื้นฐาน</div>
         <div class="swatches">
@@ -1218,6 +1237,12 @@ export class Editor {
       if (span) span.style.background = colorCss(Array.isArray(v) ? { colorStops: [{ color: v[0], offset: 0 }, { color: v[1], offset: 1 }] } : v);
     };
     el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-brand-add]')) {
+        this.addBrandColor(el.querySelector('[data-picker]').value);
+        toast('เพิ่มสีลงชุดสีแบรนด์แล้ว');
+        return this.openColorPopover(btn, prop);
+      }
+      if (e.target.closest('[data-brand-clear]')) { this.clearBrandColors(); return this.openColorPopover(btn, prop); }
       const s = e.target.closest('[data-c],[data-g]');
       if (!s) return;
       if (s.dataset.g !== undefined) apply(GRADS[+s.dataset.g]);
@@ -1319,6 +1344,7 @@ export class Editor {
           <button class="btn sm" data-a="align:middle">กลาง</button>
           <button class="btn sm" data-a="align:bottom">ล่าง</button>
         </div>
+        ${a.type === 'activeselection' ? `<div class="cp-title">เว้นระยะเท่ากัน</div><div class="grid2"><button class="btn sm" data-a="distribute:h">↔ แนวนอน</button><button class="btn sm" data-a="distribute:v">↕ แนวตั้ง</button></div>` : ''}
         <div class="cp-title">ขนาดและตำแหน่ง (px)</div>
         <div class="grid2 fields">
           <label>กว้าง <input class="input" type="number" data-f="w" value="${round(b.width)}"></label>
@@ -1333,6 +1359,7 @@ export class Editor {
       if (!x) return;
       const [k, v] = x.dataset.a.split(':');
       if (k === 'arrange') this.arrange(v);
+      else if (k === 'distribute') this.distribute(v);
       else this.align(v);
     });
     el.querySelectorAll('[data-f]').forEach((inp) => inp.addEventListener('change', () => {
@@ -1377,6 +1404,8 @@ export class Editor {
         <div class="cp-title">ขอบตัวอักษร</div>
         <label class="toggle-row">สีขอบ <button class="swatch-btn sm" data-act-color="stroke"><span style="background:${colorCss(a.stroke)}"></span></button></label>
         <label class="slider-row">ความหนา <input type="range" min="0" max="${Math.max(10, Math.round(a.fontSize * 0.15))}" step="0.5" value="${a.strokeWidth || 0}" data-p="strokeWidth"></label>
+        <div class="cp-title">ข้อความโค้ง</div>
+        <label class="slider-row">ความโค้ง <input type="range" min="-100" max="100" value="${a.curve || 0}" data-curve><output>${a.curve || 0}</output></label>
         <div class="cp-title">พื้นหลังข้อความ</div>
         <label class="toggle-row">สีไฮไลต์ <button class="swatch-btn sm" data-act-color="textBackgroundColor"><span style="background:${colorCss(a.textBackgroundColor)}"></span></button></label>` : ''}
       </div>`, { key: 'effects', align: 'right' });
@@ -1398,6 +1427,12 @@ export class Editor {
     }));
     el.querySelector('[data-sh-color]').addEventListener('click', (e) => { e.preventDefault(); ensureShadow(); this.openColorPopover(e.currentTarget, 'shadow'); });
     el.querySelectorAll('[data-act-color]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); this.openColorPopover(b, b.dataset.actColor); }));
+    const cv = el.querySelector('[data-curve]');
+    if (cv) cv.addEventListener('input', () => {
+      cv.nextElementSibling.textContent = cv.value;
+      this.setCurve(a, +cv.value);
+      clearTimeout(this._propT); this._propT = setTimeout(() => this.commit(), 400);
+    });
     el.querySelectorAll('[data-p]').forEach((r) => r.addEventListener('input', () => {
       this.setProp(r.dataset.p, +r.value, { commit: false });
       if (+r.value > 0 && !a.stroke) this.setProp('stroke', '#000000', { commit: false });
@@ -1592,7 +1627,7 @@ export class Editor {
       ? [['copy', 'คัดลอก', 'Ctrl+C'], ['paste', 'วาง', 'Ctrl+V'], ['duplicate', 'ทำสำเนา', 'Ctrl+D'], ['delete', 'ลบ', 'Del'], ['-'],
          ['arrange:front', 'นำไปไว้บนสุด'], ['arrange:forward', 'เลื่อนขึ้น'], ['arrange:backward', 'เลื่อนลง'], ['arrange:back', 'ส่งไปไว้ล่างสุด'], ['-'],
          [a.type === 'activeselection' ? 'group' : a.type === 'group' ? 'ungroup' : null, a.type === 'activeselection' ? 'จัดกลุ่ม' : 'ยกเลิกกลุ่ม'],
-         ['lock', a.locked ? 'ปลดล็อก' : 'ล็อก']].filter((x) => x[0] !== null)
+         ['copy-style', 'คัดลอกสไตล์'], ['lock', a.locked ? 'ปลดล็อก' : 'ล็อก']].filter((x) => x[0] !== null)
       : [['paste', 'วาง', 'Ctrl+V'], ['selectall', 'เลือกทั้งหมด', 'Ctrl+A'], ['-'], ['page-add', 'เพิ่มหน้าใหม่']];
     const el = popover(anchor, `<div class="menu">${items.map(([k, l, s]) => (k === '-' ? '<hr>' : `<button data-m="${k}">${l}${s ? `<kbd>${s}</kbd>` : ''}</button>`)).join('')}</div>`, { key: 'ctx', onClose: () => anchor.remove() });
     el.onclick = (ev) => {
@@ -1641,12 +1676,28 @@ export class Editor {
       this.renderTemplateThumbs();
     } else if (p === 'elements') {
       body.innerHTML = `
+        <input class="input full search" data-el-search placeholder="ค้นหาองค์ประกอบ เช่น ดาว, ตาราง, กราฟ" aria-label="ค้นหาองค์ประกอบ" />
+        <div class="sec-title">ตาราง กราฟ และอื่น ๆ</div>
+        <div class="smart-grid">
+          ${[['table', '▦', 'ตาราง'], ['bar', '📊', 'กราฟแท่ง'], ['line', '📈', 'กราฟเส้น'], ['pie', '◔', 'กราฟวงกลม'], ['donut', '◎', 'กราฟโดนัท'], ['qr', '▣', 'QR Code'], ['equation', '∑', 'สมการ']]
+            .map(([k, ic, l]) => `<button class="smart-btn" data-act="smart:${k}" title="${l}"><b>${ic}</b><span>${l}</span></button>`).join('')}
+        </div>
+        <div class="sec-title">กรอบรูป</div>
+        <div class="el-grid">${FRAMES.map(([l, m, r], i) => `<button class="el" data-act="frame:${i}" title="กรอบรูป ${l}"><span class="frame-prev ${m}" style="aspect-ratio:${r}"></span></button>`).join('')}</div>
+        <div class="sec-title">ตารางรูป (กริด)</div>
+        <div class="el-grid">${GRIDS.map(([l, cells], i) => `<button class="el" data-act="grid:${i}" title="กริด ${l}"><svg viewBox="0 0 60 60" width="100%" height="100%">${cells.map(([x, y, w, hh]) => `<rect x="${x * 52 + 5}" y="${y * 52 + 5}" width="${w * 52 - 2}" height="${hh * 52 - 2}" rx="2" fill="#cfc8ec"/>`).join('')}</svg></button>`).join('')}</div>
         <div class="sec-title">เส้น</div>
         <div class="el-grid">${LINES.map(([l], i) => `<button class="el" data-act="line:${i}" title="${l}">${shapePreviewSVG(l)}</button>`).join('')}</div>
         <div class="sec-title">รูปทรง</div>
         <div class="el-grid">${SHAPES.map(([l], i) => `<button class="el" data-act="shape:${i}" title="${l}">${shapePreviewSVG(l)}</button>`).join('')}</div>
         <div class="sec-title">สติกเกอร์</div>
-        <div class="el-grid stickers">${STICKERS.map((s, i) => `<button class="el" data-act="sticker:${i}">${s}</button>`).join('')}</div>`;
+        <div class="el-grid stickers">${STICKERS.map((s, i) => `<button class="el" data-act="sticker:${i}" title="สติกเกอร์ ${s}">${s}</button>`).join('')}</div>`;
+      const q = body.querySelector('[data-el-search]');
+      q.addEventListener('input', () => {
+        const v = q.value.trim().toLowerCase();
+        body.querySelectorAll('.el, .smart-btn').forEach((b) => { b.hidden = !!v && !(b.title || '').toLowerCase().includes(v); });
+        body.querySelectorAll('.sec-title').forEach((t) => { const g = t.nextElementSibling; t.hidden = g && [...g.children].every((c) => c.hidden); });
+      });
     } else if (p === 'text') {
       body.innerHTML = `
         <button class="btn primary full" data-act="text:heading">${icon('text', 18)} เพิ่มกล่องข้อความ</button>
@@ -1722,6 +1773,7 @@ export class Editor {
         </div>`;
       }).join('')}</div>` : '<p class="empty">หน้านี้ยังว่างอยู่ ลองเพิ่มข้อความหรือรูปทรงดูสิ</p>';
     }
+    this.markDraggable(body);
   }
 
   async renderTemplateThumbs() {
@@ -1795,6 +1847,9 @@ export class Editor {
     const objAt = (i) => this.canvas.getObjects()[+i];
     switch (k) {
       case 'tpl': return this.applyTemplate(+arg);
+      case 'smart': return this.addSmart(arg);
+      case 'frame': return this.addFrame(+arg);
+      case 'grid': return this.addGrid(+arg);
       case 'shape': return this.addShape(+arg);
       case 'line': return this.addShape(+arg, LINES);
       case 'sticker': return this.addObject(Object.assign(makeSticker(STICKERS[+arg], this.U * 0.25), { name: 'สติกเกอร์' }));
@@ -1856,6 +1911,7 @@ export class Editor {
       ['pdf', 'PDF', 'สำหรับพิมพ์ / เอกสาร หลายหน้า'],
       ['svg', 'SVG', 'ภาพเวกเตอร์ ขยายได้ไม่แตก'],
       ['webp', 'WEBP', 'ภาพเว็บ ไฟล์เล็กมาก'],
+      ['pptx', 'PowerPoint', 'ไฟล์ .pptx เปิดใน PowerPoint / Google Slides'],
       ['json', 'โปรเจกต์', 'ไฟล์ .json เปิดแก้ไขต่อได้'],
     ];
     const m = modal({
@@ -1873,6 +1929,7 @@ export class Editor {
           </label>
           <label data-opt="quality" hidden>คุณภาพ <input type="range" min="40" max="100" value="92" data-quality><output>92</output></label>
           <label data-opt="transparent" class="toggle-row"><input type="checkbox" data-transparent> พื้นหลังโปร่งใส</label>
+          <label data-opt="print" class="toggle-row"><input type="checkbox" data-print> PDF สำหรับโรงพิมพ์ (300 dpi + ระยะตัดตก 3 มม. + เครื่องหมายตัด)</label>
           <label data-opt="pages">หน้า
             <select class="select" data-pages-sel>
               <option value="all">ทุกหน้า (${n} หน้า)</option>
@@ -1889,13 +1946,16 @@ export class Editor {
     const fmt = () => el.querySelector('[name=fmt]:checked').value;
     const sync = () => {
       const f = fmt();
-      el.querySelector('[data-opt="scale"]').hidden = f === 'svg' || f === 'json';
+      const print = f === 'pdf' && el.querySelector('[data-print]').checked;
+      el.querySelector('[data-opt="scale"]').hidden = f === 'svg' || f === 'json' || print;
+      el.querySelector('[data-opt="print"]').hidden = f !== 'pdf';
       el.querySelector('[data-opt="quality"]').hidden = !(f === 'jpg' || f === 'webp');
       el.querySelector('[data-opt="transparent"]').hidden = f !== 'png';
       el.querySelector('[data-opt="pages"]').hidden = f === 'json';
       const multi = n > 1 && el.querySelector('[data-pages-sel]').value !== 'cur';
       el.querySelector('[data-ex-hint]').textContent =
         f === 'pdf' ? `ทุกหน้าที่เลือกจะรวมเป็นไฟล์ PDF ไฟล์เดียว${this.design.mm ? ` ขนาด ${this.design.mm[0]}×${this.design.mm[1]} มม.` : ''}` :
+        f === 'pptx' ? 'แต่ละหน้าจะเป็น 1 สไลด์ (เป็นภาพ แก้ข้อความใน PowerPoint ไม่ได้)' :
         f === 'json' ? 'เก็บไฟล์นี้ไว้ แล้วเปิดด้วยเมนู “เปิดไฟล์โปรเจกต์” เพื่อแก้ไขต่อได้ทุกเครื่อง' :
         multi ? 'หลายหน้าจะถูกรวมเป็นไฟล์ .zip' : '';
     };
@@ -1929,6 +1989,7 @@ export class Editor {
           scale: +el.querySelector('[data-scale]').value,
           quality: +q.value / 100,
           transparent: el.querySelector('[data-transparent]').checked,
+          print: el.querySelector('[data-print]').checked,
           onProgress: (i, total) => { go.textContent = total > 1 ? `กำลังสร้าง ${Math.min(i + 1, total)}/${total}…` : 'กำลังสร้าง…'; },
         });
         m.close();
@@ -2010,3 +2071,5 @@ export class Editor {
     toast(`ปรับขนาดเป็น ${nw} × ${nh} px แล้ว`, 'ok');
   }
 }
+
+Object.assign(Editor.prototype, features);

@@ -112,9 +112,10 @@ async function renderHome() {
         </div>
       </section>
       <section class="home-sec">
-        <h2>งานออกแบบของฉัน <small>${designs.length ? `(${designs.length})` : ''}</small></h2>
+        <div class="sec-head"><h2>งานออกแบบของฉัน <small>${designs.length ? `(${designs.length})` : ''}</small></h2>
+        ${designs.length ? '<input class="input" data-search placeholder="ค้นหางานออกแบบ…" aria-label="ค้นหางานออกแบบ">' : ''}</div>
         ${designs.length ? `<div class="design-grid">${designs.map((d) => `
-          <div class="design-card">
+          <div class="design-card" data-name="${esc(d.name.toLowerCase())}">
             <button class="design-thumb" data-open="${d.id}" style="aspect-ratio:${d.width}/${d.height}">${d.thumb ? `<img src="${d.thumb}" alt="">` : ''}</button>
             <div class="design-meta">
               <div><b title="${esc(d.name)}">${esc(d.name)}</b><small>${d.width}×${d.height} · ${d.pages.length} หน้า · ${relTime(d.updatedAt)}</small></div>
@@ -137,6 +138,11 @@ async function renderHome() {
     if (t.dataset.menu) return designMenu(t, t.dataset.menu);
     if (t.dataset.act === 'custom') return customSizeDialog();
     if (t.dataset.act === 'import') return el.querySelector('[data-file]').click();
+  });
+  const search = el.querySelector('[data-search]');
+  if (search) search.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase();
+    el.querySelectorAll('.design-card').forEach((c) => { c.hidden = !!q && !c.dataset.name.includes(q); });
   });
   el.querySelector('[data-file]').addEventListener('change', (e) => {
     const f = e.target.files[0];
@@ -201,6 +207,7 @@ async function route() {
     },
   });
   await editor.mount();
+  window.__lai = editor; // handle for automated tests
 }
 
 window.addEventListener('hashchange', route);
