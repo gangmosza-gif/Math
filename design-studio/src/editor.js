@@ -2,14 +2,16 @@ import {
   Canvas, Point, Textbox, FabricImage, ActiveSelection, Group, PencilBrush, Shadow,
   Rect, Circle, Polygon, Path, Gradient, filters, util, InteractiveFabricObject, config,
 } from 'fabric';
-import { icon } from './icons.js';
+import { icon, LIBRARY_ICONS } from './icons.js';
 import { esc, h, toast, modal, confirmDialog, popover, closePopover, currentPopoverId } from './ui.js';
 import { FONTS, ensureFont, ensureFonts, fontsInJSON, linkAllFonts } from './fonts.js';
 import { SHAPES, LINES, STICKERS, makeSticker, shapePreviewSVG } from './shapes.js';
 import { TEMPLATES, buildTemplate, templateFonts, pageGradient } from './templates.js';
-import { exportDesign, printDesign, pageThumb, renderPage } from './export.js';
+import { exportDesign, printDesign, pageThumb, renderPage, safeURL } from './export.js';
+export { safeURL };
 import { saveDesign, listUploads, saveUpload, deleteUpload, uid } from './storage.js';
 import { PRESETS } from './presets.js';
+import { Vignette, warmthMatrix, tintMatrix, duotoneMatrix, sharpen } from './filters.js';
 import { fileToDataURL } from './imageutil.js';
 import { features, SMART_LABEL } from './features.js';
 import { FRAMES, GRIDS } from './smart.js';
@@ -30,7 +32,7 @@ Object.assign(InteractiveFabricObject.ownDefaults, {
   padding: 2,
 });
 
-const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder'];
+const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder', 'link', 'alt', 'autoPage'];
 export const BLANK_PAGE = (bg = '#ffffff') => JSON.stringify({ version: '6.9.1', objects: [], background: bg });
 
 const COLORS = [
@@ -1043,6 +1045,7 @@ export class Editor {
     const common = () => `
       <span class="grow"></span>
       ${a && a.type !== 'activeselection' ? btn('copy-style', 'paint', 'คัดลอกสไตล์ แล้วคลิกวัตถุอื่นเพื่อวาง') : ''}
+      ${a && a.type !== 'activeselection' ? btn('pop:link', 'link', a.link ? 'ลิงก์: ' + a.link : 'ใส่ลิงก์', !!a.link) : ''}
       ${btn('pop:opacity', 'opacity', 'ความโปร่งใส')}
       ${btn('pop:position', 'position', 'ตำแหน่ง', false, 'ตำแหน่ง')}
       ${btn('duplicate', 'copy', 'ทำสำเนา (Ctrl+D)')}
@@ -1065,7 +1068,9 @@ export class Editor {
         ${common()}`;
     } else if (kind === 'smart') {
       const label = SMART_LABEL[a.smart.type] || 'องค์ประกอบ';
-      html = `<button class="btn sm primary-soft" data-act="smart-edit">${icon('pen', 16)} แก้ไข${label}</button>
+      html = a.smart.type === 'icon' ? `${sw('iconColor', a.smart.color, 'สีไอคอน')}
+        <label class="mini">เส้นหนา <input type="range" min="0.5" max="4" step="0.1" value="${a.smart.weight || 1.8}" data-icon-weight></label>
+        ${btn('flip:flipX', 'flipH', 'พลิกแนวนอน')}${common()}` : `<button class="btn sm primary-soft" data-act="smart-edit">${icon('pen', 16)} แก้ไข${label}</button>
         ${btn('pop:effects', 'effects', 'เงา', false, 'เอฟเฟกต์')}
         ${common()}`;
     } else if (kind === 'group') {
@@ -1089,7 +1094,8 @@ export class Editor {
         ${btn('toggle:linethrough', 'strike', 'ขีดฆ่า', a.linethrough)}
         ${btn('text-align', alignIc, 'จัดตำแหน่งข้อความ')}
         ${btn('text-case', 'case', 'ตัวพิมพ์ใหญ่/เล็ก')}
-        ${btn('list', 'list', 'รายการแบบจุด/ตัวเลข', !!a.listType)}
+        ${btn('list', 'list', 'รายการ: จุด → ตัวเลข → เช็กบ็อกซ์ → ปกติ', !!a.listType)}
+        ${a.listType === 'check' ? btn('check-item', 'check', 'ติ๊กถูก/เอาออก (บรรทัดที่เคอร์เซอร์อยู่ หรือทั้งหมด)') : ''}
         ${btn('pop:spacing', 'spacing', 'ระยะห่าง')}
         ${btn('pop:effects', 'effects', 'เอฟเฟกต์', false, 'เอฟเฟกต์')}
         ${common()}`;
@@ -1131,6 +1137,8 @@ export class Editor {
     bar.querySelectorAll('[data-range]').forEach((r) => {
       r.addEventListener('input', () => this.setProp(r.dataset.range, +r.value, { commit: false }));
     });
+    const iw = bar.querySelector('[data-icon-weight]');
+    if (iw) iw.addEventListener('change', () => this.rebuildSmart(a, { ...a.smart, weight: +iw.value }));
     const ds = bar.querySelector('[data-select="dash"]');
     if (ds) ds.addEventListener('change', () => {
       const w = a.strokeWidth || 4;
@@ -1149,6 +1157,7 @@ export class Editor {
       case 'smart-edit': return this.openSmartEditor();
       case 'replace-img': return this.pickReplaceImage();
       case 'list': return this.toggleList();
+      case 'check-item': return this.toggleCheck();
       case 'distribute': return this.distribute(arg);
       case 'copy-style': return this.copyStyle();
       case 'delete': return this.deleteSelection();
@@ -1200,9 +1209,11 @@ export class Editor {
     const isBg = prop === 'bg';
     let cur;
     if (isBg) cur = this.canvas.backgroundColor;
+    else if (prop === 'iconColor') cur = a?.smart?.color;
     else if (prop === 'shadow') cur = a?.shadow?.color;
     else cur = a?.[prop];
     const allowNone = prop === 'stroke' || prop === 'textBackgroundColor' || prop === 'fill';
+    const iconTarget = prop === 'iconColor' ? a : null;
     const allowGrad = (prop === 'fill' && !isLineLike(a)) || isBg;
     const docColors = this.documentColors();
     const el = popover(btn, `
@@ -1226,6 +1237,8 @@ export class Editor {
         if (Array.isArray(v)) this.setBackground(v);
         else if (final) this.setBackground(v || '#ffffff');
         else { this.canvas.backgroundColor = v; this.canvas.backgroundImage = null; this.canvas.requestRenderAll(); }
+      } else if (prop === 'iconColor') {
+        if (final && v && iconTarget && iconTarget.canvas) this.rebuildSmart(iconTarget, { ...iconTarget.smart, color: v }).then((n) => { if (n) this.renderCtx(); });
       } else if (prop === 'shadow') {
         const sh = a.shadow;
         if (sh) { sh.color = v; a.set('dirty', true); this.canvas.requestRenderAll(); if (final) this.commit(); }
@@ -1288,6 +1301,7 @@ export class Editor {
       return;
     }
     if (kind === 'position') return this.openPositionPopover(btn);
+    if (kind === 'link') return this.openLinkPopover(btn);
     if (kind === 'effects') return this.openEffectsPopover(btn);
     if (kind === 'adjust' || kind === 'crop' || kind === 'mask') return this.openImagePopover(kind, btn);
   }
@@ -1393,7 +1407,7 @@ export class Editor {
           <button data-fx="none">ไม่มี</button>
           <button data-fx="shadow">เงา</button>
           <button data-fx="lift">ยกลอย</button>
-          ${text ? '<button data-fx="outline">ขอบ</button><button data-fx="hollow">กลวง</button><button data-fx="neon">นีออน</button><button data-fx="highlight">ไฮไลต์</button>' : ''}
+          ${text ? '<button data-fx="outline">ขอบ</button><button data-fx="hollow">กลวง</button><button data-fx="splice">ตัดซ้อน</button><button data-fx="echo">เงาสะท้อน</button><button data-fx="glitch">กลิตช์</button><button data-fx="neon">นีออน</button><button data-fx="highlight">ไฮไลต์</button>' : ''}
         </div>
         <div class="cp-title">เงา</div>
         <label class="toggle-row"><input type="checkbox" data-sh-on ${sh ? 'checked' : ''}> เปิดเงา <button class="swatch-btn sm" data-sh-color title="สีเงา"><span style="background:${sh ? sh.color : 'rgba(0,0,0,.35)'}"></span></button></label>
@@ -1450,6 +1464,10 @@ export class Editor {
       if (fx === 'lift') set({ shadow: new Shadow({ color: 'rgba(0,0,0,0.25)', blur: fs * 0.35, offsetX: 0, offsetY: fs * 0.12 }) });
       if (fx === 'outline') set({ stroke: '#ffffff', strokeWidth: fs * 0.06, paintFirst: 'stroke' });
       if (fx === 'hollow') set({ stroke: typeof a.fill === 'string' && a.fill !== 'transparent' ? a.fill : '#1f2333', strokeWidth: Math.max(1, fs * 0.025), fill: 'transparent' });
+      const base = typeof a.fill === 'string' && a.fill !== 'transparent' ? a.fill : '#1f2333';
+      if (fx === 'splice') set({ stroke: base, strokeWidth: Math.max(1, fs * 0.03), fill: 'transparent', shadow: new Shadow({ color: '#ffb020', blur: 0, offsetX: fs * 0.06, offsetY: fs * 0.06 }) });
+      if (fx === 'echo') set({ shadow: new Shadow({ color: base.length === 7 ? base + '66' : 'rgba(0,0,0,0.4)', blur: 0, offsetX: fs * 0.08, offsetY: fs * 0.08 }) });
+      if (fx === 'glitch') set({ shadow: new Shadow({ color: '#00e5ff', blur: 0, offsetX: -fs * 0.05, offsetY: 0 }), stroke: '#ff2bd6', strokeWidth: Math.max(1, fs * 0.015), paintFirst: 'stroke' });
       if (fx === 'neon') set({ fill: '#ffffff', shadow: new Shadow({ color: '#ff2bd6', blur: fs * 0.35, offsetX: 0, offsetY: 0 }) });
       if (fx === 'highlight') set({ textBackgroundColor: '#ffe066' });
       if (text) a.initDimensions();
@@ -1466,7 +1484,8 @@ export class Editor {
     btn = btn || this.$(`[data-act="pop:${kind}"]`);
     if (!btn) return;
     if (kind === 'adjust') {
-      const adj = { brightness: 0, contrast: 0, saturation: 0, blur: 0, hue: 0, grayscale: false, sepia: false, invert: false, ...(a.adj || {}) };
+      const ADJ0 = { brightness: 0, contrast: 0, saturation: 0, blur: 0, hue: 0, warmth: 0, tint: 0, sharpen: 0, vignette: 0, pixelate: 0, grayscale: false, sepia: false, invert: false, duotone: false, duoDark: '#1d2b64', duoLight: '#f8cdda' };
+      const adj = { ...ADJ0, ...(a.adj || {}) };
       const sl = (k, label, min = -100, max = 100) => `<label class="slider-row">${label} <input type="range" min="${min}" max="${max}" value="${adj[k]}" data-k="${k}"><output>${adj[k]}</output></label>`;
       const el = popover(btn, `
         <div class="pad">
@@ -1474,9 +1493,14 @@ export class Editor {
           <div class="fx-presets">
             <button data-pre="none">ต้นฉบับ</button><button data-pre="bw">ขาวดำ</button><button data-pre="sepia">ซีเปีย</button>
             <button data-pre="vivid">สดใส</button><button data-pre="fade">ซีดจาง</button><button data-pre="dramatic">ดราม่า</button>
+            <button data-pre="warm">อบอุ่น</button><button data-pre="cool">เย็นตา</button><button data-pre="retro">ย้อนยุค</button>
           </div>
           <div class="cp-title">ปรับแต่ง</div>
-          ${sl('brightness', 'ความสว่าง')}${sl('contrast', 'คอนทราสต์')}${sl('saturation', 'ความอิ่มสี')}${sl('hue', 'โทนสี', -180, 180)}${sl('blur', 'เบลอ', 0, 100)}
+          ${sl('brightness', 'ความสว่าง')}${sl('contrast', 'คอนทราสต์')}${sl('saturation', 'ความอิ่มสี')}${sl('warmth', 'อุณหภูมิสี')}${sl('tint', 'ทินต์ (เขียว–ม่วง)')}${sl('hue', 'โทนสี', -180, 180)}
+          ${sl('sharpen', 'ความคมชัด', 0, 100)}${sl('blur', 'เบลอ', 0, 100)}${sl('vignette', 'ขอบมืด (วิกเน็ต)', 0, 100)}${sl('pixelate', 'พิกเซล', 0, 40)}
+          <div class="cp-title">ทูโทน (Duotone)</div>
+          <label class="toggle-row"><input type="checkbox" data-t="duotone" ${adj.duotone ? 'checked' : ''}> เปิดทูโทน
+            <input type="color" data-duo="duoDark" value="${adj.duoDark}" aria-label="สีเงา"> <input type="color" data-duo="duoLight" value="${adj.duoLight}" aria-label="สีสว่าง"></label>
           <label class="toggle-row"><input type="checkbox" data-t="grayscale" ${adj.grayscale ? 'checked' : ''}> ขาวดำ</label>
           <label class="toggle-row"><input type="checkbox" data-t="sepia" ${adj.sepia ? 'checked' : ''}> ซีเปีย</label>
           <label class="toggle-row"><input type="checkbox" data-t="invert" ${adj.invert ? 'checked' : ''}> กลับสี</label>
@@ -1488,7 +1512,13 @@ export class Editor {
         if (adj.contrast) f.push(new filters.Contrast({ contrast: adj.contrast / 100 }));
         if (adj.saturation) f.push(new filters.Saturation({ saturation: adj.saturation / 100 }));
         if (adj.hue) f.push(new filters.HueRotation({ rotation: adj.hue / 180 }));
+        if (adj.warmth) f.push(warmthMatrix(adj.warmth / 100));
+        if (adj.tint) f.push(tintMatrix(adj.tint / 100));
+        if (adj.sharpen) f.push(sharpen(adj.sharpen));
         if (adj.blur) f.push(new filters.Blur({ blur: adj.blur / 200 }));
+        if (adj.pixelate) f.push(new filters.Pixelate({ blocksize: Math.max(2, Math.round(adj.pixelate)) }));
+        if (adj.duotone) f.push(duotoneMatrix(adj.duoDark, adj.duoLight));
+        if (adj.vignette) f.push(new Vignette({ amount: adj.vignette / 100 }));
         if (adj.grayscale) f.push(new filters.Grayscale());
         if (adj.sepia) f.push(new filters.Sepia());
         if (adj.invert) f.push(new filters.Invert());
@@ -1504,10 +1534,14 @@ export class Editor {
       };
       el.querySelectorAll('[data-k]').forEach((r) => r.addEventListener('input', () => { adj[r.dataset.k] = +r.value; r.nextElementSibling.textContent = r.value; apply(false); }));
       el.querySelectorAll('[data-t]').forEach((c) => c.addEventListener('change', () => { adj[c.dataset.t] = c.checked; apply(true); }));
+      el.querySelectorAll('[data-duo]').forEach((c) => c.addEventListener('input', () => { adj[c.dataset.duo] = c.value; adj.duotone = true; el.querySelector('[data-t="duotone"]').checked = true; apply(false); }));
       el.querySelector('.fx-presets').addEventListener('click', (e) => {
         const p = e.target.closest('[data-pre]')?.dataset.pre;
         if (!p) return;
-        Object.assign(adj, { brightness: 0, contrast: 0, saturation: 0, blur: 0, hue: 0, grayscale: false, sepia: false, invert: false });
+        Object.assign(adj, { ...ADJ0, duoDark: adj.duoDark, duoLight: adj.duoLight });
+        if (p === 'warm') Object.assign(adj, { warmth: 45, saturation: 10 });
+        if (p === 'cool') Object.assign(adj, { warmth: -45, tint: -10 });
+        if (p === 'retro') Object.assign(adj, { sepia: true, vignette: 55, contrast: -10 });
         if (p === 'bw') Object.assign(adj, { grayscale: true, contrast: 10 });
         if (p === 'sepia') Object.assign(adj, { sepia: true });
         if (p === 'vivid') Object.assign(adj, { saturation: 40, contrast: 15, brightness: 3 });
@@ -1679,9 +1713,12 @@ export class Editor {
         <input class="input full search" data-el-search placeholder="ค้นหาองค์ประกอบ เช่น ดาว, ตาราง, กราฟ" aria-label="ค้นหาองค์ประกอบ" />
         <div class="sec-title">ตาราง กราฟ และอื่น ๆ</div>
         <div class="smart-grid">
-          ${[['table', '▦', 'ตาราง'], ['bar', '📊', 'กราฟแท่ง'], ['line', '📈', 'กราฟเส้น'], ['pie', '◔', 'กราฟวงกลม'], ['donut', '◎', 'กราฟโดนัท'], ['qr', '▣', 'QR Code'], ['equation', '∑', 'สมการ']]
+          ${[['table', '▦', 'ตาราง'], ['bar', '📊', 'กราฟแท่ง'], ['hbar', '☰', 'กราฟแท่งแนวนอน'], ['line', '📈', 'กราฟเส้น'], ['area', '◭', 'กราฟพื้นที่'], ['pie', '◔', 'กราฟวงกลม'], ['donut', '◎', 'กราฟโดนัท'],
+              ['progress', '▰', 'แถบความคืบหน้า อินโฟกราฟิก'], ['ring', '◌', 'วงแหวนความคืบหน้า อินโฟกราฟิก'], ['pictogram', '👥', 'ภาพสัญลักษณ์ อินโฟกราฟิก'], ['qr', '▣', 'QR Code'], ['equation', '∑', 'สมการ']]
             .map(([k, ic, l]) => `<button class="smart-btn" data-act="smart:${k}" title="${l}"><b>${ic}</b><span>${l}</span></button>`).join('')}
         </div>
+        <div class="sec-title">ไอคอน</div>
+        <div class="el-grid icons">${LIBRARY_ICONS.map(([n, l]) => `<button class="el" data-act="smart:icon-${n}" title="ไอคอน ${l}">${icon(n, 26)}</button>`).join('')}</div>
         <div class="sec-title">กรอบรูป</div>
         <div class="el-grid">${FRAMES.map(([l, m, r], i) => `<button class="el" data-act="frame:${i}" title="กรอบรูป ${l}"><span class="frame-prev ${m}" style="aspect-ratio:${r}"></span></button>`).join('')}</div>
         <div class="sec-title">ตารางรูป (กริด)</div>

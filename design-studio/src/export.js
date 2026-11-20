@@ -26,6 +26,25 @@ export async function renderPage(design, pageJSON, { transparent = false, forceB
   return sc;
 }
 
+/** Links on a page: [{ url, left, top, width, height }] in design pixels. */
+export async function pageLinks(design, pageJSON) {
+  const json = typeof pageJSON === 'string' ? JSON.parse(pageJSON) : pageJSON;
+  if (!(json.objects || []).some((o) => o.link)) return [];
+  const sc = await renderPage(design, json);
+  const out = sc.getObjects().filter((o) => o.link && o.visible).map((o) => ({ url: o.link, ...o.getBoundingRect() }));
+  sc.dispose();
+  return out;
+}
+
+export function safeURL(u) {
+  u = String(u || '').trim();
+  if (!u) return '';
+  if (!/^(https?:|mailto:|tel:)/i.test(u)) u = /^[\w.-]+@[\w.-]+\.\w+$/.test(u) ? 'mailto:' + u : 'https://' + u.replace(/^\/+/, '');
+  // PDF link targets must be plain ASCII: percent-encode Thai and other characters
+  try { u = encodeURI(decodeURI(u)); } catch { u = encodeURI(u); }
+  return u;
+}
+
 export async function pageToDataURL(design, pageJSON, { format = 'png', multiplier = 1, quality = 0.92, transparent = false, bleed = 0 } = {}) {
   const sc = await renderPage(design, pageJSON, { transparent: transparent && format === 'png', forceBg: format === 'png' ? null : '#ffffff', bleed });
   const url = sc.toDataURL({ format, multiplier, quality, enableRetinaScaling: false });
@@ -112,6 +131,8 @@ export async function exportDesign(design, opts) {
       if (k > 0) pdf.addPage([pw, ph], orientation);
       const url = await pageToDataURL(design, list[k].page.json, { format: 'jpeg', multiplier: scale, quality: 0.95 });
       pdf.addImage(url, 'JPEG', 0, 0, pw, ph, undefined, 'FAST');
+      const f = pw / design.width;
+      for (const l of await pageLinks(design, list[k].page.json)) pdf.link(l.left * f, l.top * f, l.width * f, l.height * f, { url: l.url });
     }
     onProgress(list.length, list.length);
     return downloadBlob(pdf.output('blob'), `${name}.pdf`);
@@ -178,6 +199,8 @@ async function exportPrintPDF(design, list, name, onProgress) {
     if (k > 0) pdf.addPage([pw, ph], orientation);
     const url = await pageToDataURL(design, list[k].page.json, { format: 'jpeg', multiplier, quality: 0.95, bleed: Math.round(bleedMM * pxPerMM) });
     pdf.addImage(url, 'JPEG', slugMM, slugMM, tw + 2 * bleedMM, th + 2 * bleedMM, undefined, 'FAST');
+    const f = tw / design.width, o = slugMM + bleedMM;
+    for (const l of await pageLinks(design, list[k].page.json)) pdf.link(o + l.left * f, o + l.top * f, l.width * f, l.height * f, { url: l.url });
     // crop marks at the trim edges, drawn in the slug area
     pdf.setDrawColor(0);
     pdf.setLineWidth(0.25);

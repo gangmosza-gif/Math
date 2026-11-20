@@ -437,3 +437,7 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 .present-bar:hover { opacity: 1; }
 .present-bar .icon-btn { color: #fff; }
 .present-bar .icon-btn:hover { background: rgba(255, 255, 255, 0.15); }
+.row-gap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.import-box { border: 1px dashed var(--line); border-radius: 8px; padding: 10px; margin-top: 8px; }
+.present-link { position: absolute; display: block; cursor: pointer; border-radius: 4px; }
+.present-link:hover { outline: 2px solid rgba(124, 92, 255, 0.8); background: rgba(124, 92, 255, 0.12); }

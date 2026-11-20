@@ -2,6 +2,7 @@
 // Each returns a fabric object carrying `smart = { type, ...data }` so it can be edited later.
 import { Group, Rect, Textbox, Line, Polyline, Circle, Path, FabricText, loadSVGFromString, util } from 'fabric';
 import qrcode from 'qrcode-generator';
+import { ICON_PATHS } from './icons.js';
 
 export const CHART_COLORS = ['#7c5cff', '#ff5fa2', '#22c3e6', '#ffb020', '#2ecc71', '#ff6b4a', '#4f8cff', '#a0a8c0'];
 
@@ -63,7 +64,23 @@ export function buildTable(d) {
 }
 
 // ---------------------------------------------------------------- chart
+export const CHART_TYPES = [
+  ['bar', 'กราฟแท่ง'], ['hbar', 'กราฟแท่งแนวนอน'], ['line', 'กราฟเส้น'], ['area', 'กราฟพื้นที่'],
+  ['pie', 'กราฟวงกลม'], ['donut', 'กราฟโดนัท'], ['progress', 'แถบความคืบหน้า (%)'], ['ring', 'วงแหวนความคืบหน้า (%)'], ['pictogram', 'ภาพสัญลักษณ์ (%)'],
+];
+const PERCENT_TYPES = ['progress', 'ring', 'pictogram'];
+
 export function defaultChart(type, U) {
+  if (PERCENT_TYPES.includes(type)) {
+    return {
+      type: 'chart', chart: type, title: type === 'pictogram' ? 'นักเรียนที่ผ่านเกณฑ์' : 'ความคืบหน้าโครงการ',
+      labels: type === 'pictogram' ? ['ห้อง 1', 'ห้อง 2'] : ['ออกแบบ', 'พัฒนา', 'ทดสอบ'],
+      values: type === 'pictogram' ? [70, 40] : [90, 65, 30],
+      colors: CHART_COLORS, showValues: true,
+      width: Math.round(U * 0.7), height: Math.round(U * (type === 'ring' ? 0.32 : 0.36)),
+      fontFamily: 'Prompt', color: '#1f2333',
+    };
+  }
   return {
     type: 'chart',
     chart: type,
@@ -97,7 +114,65 @@ export function buildChart(d) {
   }
   // invisible frame keeps the group's box stable
   objs.push(new Rect({ left: 0, top: 0, width: W, height: H, fill: 'transparent', strokeWidth: 0, selectable: false }));
-  if (d.chart === 'bar' || d.chart === 'line') {
+  if (d.chart === 'hbar') {
+    const max = Math.max(1, ...vals);
+    const n = Math.max(1, vals.length);
+    const labelW = Math.min(W * 0.3, fs * 6);
+    const rowH = (H - top) / n;
+    vals.forEach((v, i) => {
+      const y = top + rowH * i;
+      const bw = ((W - labelW - fs * 3) * Math.max(0, v)) / max;
+      objs.push(txt(d.labels[i] ?? '', { fontSize: fs * 0.85, originX: 'right', originY: 'center', left: labelW - fs * 0.4, top: y + rowH / 2 }));
+      objs.push(new Rect({ left: labelW, top: y + rowH * 0.18, width: Math.max(0.5, bw), height: rowH * 0.64, fill: d.colors[i % d.colors.length], rx: 4, ry: 4 }));
+      if (d.showValues) objs.push(txt(fmt(v), { fontSize: fs * 0.85, fontWeight: 'bold', originY: 'center', left: labelW + bw + fs * 0.3, top: y + rowH / 2 }));
+    });
+  } else if (d.chart === 'progress') {
+    const n = Math.max(1, vals.length);
+    const rowH = (H - top) / n;
+    vals.forEach((v, i) => {
+      const p = Math.max(0, Math.min(100, v));
+      const y = top + rowH * i;
+      objs.push(txt(d.labels[i] ?? '', { fontSize: fs * 0.85, left: 0, top: y }));
+      if (d.showValues) objs.push(txt(`${fmt(p)}%`, { fontSize: fs * 0.85, fontWeight: 'bold', originX: 'right', left: W, top: y }));
+      const by = y + fs * 1.35, bh = Math.max(6, Math.min(rowH - fs * 1.6, fs * 0.9));
+      objs.push(new Rect({ left: 0, top: by, width: W, height: bh, rx: bh / 2, ry: bh / 2, fill: 'rgba(127,127,127,0.18)' }));
+      if (p > 0) objs.push(new Rect({ left: 0, top: by, width: Math.max(bh, (W * p) / 100), height: bh, rx: bh / 2, ry: bh / 2, fill: d.colors[i % d.colors.length] }));
+    });
+  } else if (d.chart === 'ring') {
+    const n = Math.max(1, vals.length);
+    const cw = W / n;
+    const r = Math.min(cw * 0.42, (H - top - fs * 1.8) / 2);
+    const sw = r * 0.22;
+    vals.forEach((v, i) => {
+      const p = Math.max(0, Math.min(100, v));
+      const cx = cw * (i + 0.5), cy = top + r + sw / 2;
+      objs.push(new Circle({ left: cx, top: cy, radius: r, originX: 'center', originY: 'center', fill: '', stroke: 'rgba(127,127,127,0.18)', strokeWidth: sw }));
+      if (p > 0) {
+        const a0 = -Math.PI / 2, a1 = a0 + (Math.PI * 2 * Math.min(p, 99.99)) / 100;
+        const pt = (a) => `${cx + r * Math.cos(a)} ${cy + r * Math.sin(a)}`;
+        objs.push(new Path(`M ${pt(a0)} A ${r} ${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${pt(a1)}`, { fill: '', stroke: d.colors[i % d.colors.length], strokeWidth: sw, strokeLineCap: 'round' }));
+      }
+      if (d.showValues) objs.push(txt(`${fmt(p)}%`, { fontSize: fs * 1.1, fontWeight: 'bold', originX: 'center', originY: 'center', left: cx, top: cy }));
+      objs.push(txt(d.labels[i] ?? '', { fontSize: fs * 0.85, originX: 'center', left: cx, top: cy + r + sw / 2 + fs * 0.4 }));
+    });
+  } else if (d.chart === 'pictogram') {
+    const n = Math.max(1, vals.length);
+    const rowH = (H - top) / n;
+    const labelW = Math.min(W * 0.25, fs * 5);
+    const size = Math.min(rowH * 0.8, (W - labelW - fs * 3) / 10.5);
+    const person = (x, y, s, fill) => [
+      new Circle({ left: x + s * 0.5, top: y + s * 0.2, radius: s * 0.18, originX: 'center', originY: 'center', fill }),
+      new Path(`M ${x + s * 0.2} ${y + s} L ${x + s * 0.2} ${y + s * 0.6} Q ${x + s * 0.2} ${y + s * 0.42} ${x + s * 0.38} ${y + s * 0.42} L ${x + s * 0.62} ${y + s * 0.42} Q ${x + s * 0.8} ${y + s * 0.42} ${x + s * 0.8} ${y + s * 0.6} L ${x + s * 0.8} ${y + s} Z`, { fill }),
+    ];
+    vals.forEach((v, i) => {
+      const p = Math.max(0, Math.min(100, v));
+      const y = top + rowH * i + (rowH - size) / 2;
+      objs.push(txt(d.labels[i] ?? '', { fontSize: fs * 0.85, originY: 'center', left: 0, top: y + size / 2 }));
+      const filled = Math.round(p / 10);
+      for (let k = 0; k < 10; k++) objs.push(...person(labelW + k * size * 1.05, y, size, k < filled ? d.colors[i % d.colors.length] : 'rgba(127,127,127,0.25)'));
+      if (d.showValues) objs.push(txt(`${fmt(p)}%`, { fontSize: fs * 0.85, fontWeight: 'bold', originY: 'center', left: labelW + 10.5 * size * 1.05, top: y + size / 2 }));
+    });
+  } else if (d.chart === 'bar' || d.chart === 'line' || d.chart === 'area') {
     const max = Math.max(1, ...vals);
     const axisL = fs * 2.6, axisB = H - fs * 2;
     const plotH = axisB - top - fs * 1.2;
@@ -121,7 +196,11 @@ export function buildChart(d) {
       if (d.showValues) objs.push(txt(fmt(v), { fontSize: fs * 0.85, fontWeight: 'bold', originX: 'center', originY: 'bottom', left: cx, top: axisB - h - fs * (d.chart === 'line' ? 0.6 : 0.25) }));
       objs.push(txt(d.labels[i] ?? '', { fontSize: fs * 0.85, originX: 'center', left: cx, top: axisB + fs * 0.4 }));
     });
-    if (d.chart === 'line' && pts.length) {
+    if (d.chart === 'area' && pts.length) {
+      const poly = [{ x: pts[0].x, y: axisB }, ...pts, { x: pts[pts.length - 1].x, y: axisB }];
+      objs.push(new Polyline(poly, { fill: d.colors[0], opacity: 0.3, stroke: '', objectCaching: false }));
+    }
+    if ((d.chart === 'line' || d.chart === 'area') && pts.length) {
       objs.push(new Polyline(pts, { fill: '', stroke: d.colors[0], strokeWidth: Math.max(3, fs * 0.22), strokeLineJoin: 'round', strokeLineCap: 'round', objectCaching: false }));
       pts.forEach((p) => objs.push(new Circle({ left: p.x, top: p.y, radius: fs * 0.32, originX: 'center', originY: 'center', fill: '#ffffff', stroke: d.colors[0], strokeWidth: fs * 0.15 })));
     }
@@ -276,3 +355,48 @@ export const GRIDS = [
   ['6 ช่อง', [0, 1, 2].flatMap((c) => [0, 1].map((r) => [c / 3, r / 2, 1 / 3, 0.5]))],
   ['ช่องใหญ่ + 3', [[0, 0, 1, 0.62], [0, 0.62, 1 / 3, 0.38], [1 / 3, 0.62, 1 / 3, 0.38], [2 / 3, 0.62, 1 / 3, 0.38]]],
 ];
+
+/** Parse pasted / uploaded CSV or TSV text into rows of cells. */
+export function parseDelimited(text) {
+  const lines = String(text || '').replace(/\r/g, '').split('\n').filter((l) => l.trim() !== '');
+  if (!lines.length) return [];
+  const sep = lines[0].includes('\t') ? '\t' : lines[0].includes(';') && !lines[0].includes(',') ? ';' : ',';
+  return lines.map((line) => {
+    const out = [];
+    let cur = '', q = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; }
+      else if (ch === sep && !q) { out.push(cur.trim()); cur = ''; }
+      else cur += ch;
+    }
+    out.push(cur.trim());
+    return out;
+  });
+}
+
+/** Rows -> { labels, values } (first column = label, second = number; header row skipped). */
+export function rowsToSeries(rows) {
+  const num = (v) => parseFloat(String(v).replace(/[,%\s]/g, ''));
+  const body = rows.length && rows[0].length > 1 && isNaN(num(rows[0][1])) ? rows.slice(1) : rows;
+  const labels = [], values = [];
+  for (const r of body) {
+    if (r.length < 2 || isNaN(num(r[1]))) continue;
+    labels.push(r[0]);
+    values.push(num(r[1]));
+  }
+  return { labels, values };
+}
+
+// ---------------------------------------------------------------- icons
+export async function buildIcon(d) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${d.color}" stroke-width="${d.weight || 1.8}" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[d.name] || ''}</svg>`;
+  const { objects, options } = await loadSVGFromString(svg);
+  const list = objects.filter(Boolean);
+  list.forEach((o) => { if (!o.fill || o.fill === 'none') o.set('fill', ''); });
+  const frame = new Rect({ left: 0, top: 0, width: 24, height: 24, fill: 'transparent', strokeWidth: 0 });
+  const g = new Group([frame, ...list], { smart: { ...d }, name: 'ไอคอน' });
+  const k = d.size / 24;
+  g.set({ scaleX: k, scaleY: k });
+  return g;
+}

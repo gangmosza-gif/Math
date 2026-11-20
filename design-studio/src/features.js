@@ -1,13 +1,14 @@
 // Extra editor features, mixed into Editor.prototype.
 import { FabricImage, Path, Point, ActiveSelection } from 'fabric';
 import { icon } from './icons.js';
-import { esc, toast, modal } from './ui.js';
+import { esc, toast, modal, popover, closePopover } from './ui.js';
 import { FONTS, ensureFont } from './fonts.js';
 import {
+  buildIcon,
   buildTable, buildChart, buildQR, buildEquation, latexToSVG, placeholderImage,
-  defaultTable, defaultChart, defaultQR, defaultEquation, FRAMES, GRIDS, CHART_COLORS,
+  defaultTable, defaultChart, defaultQR, defaultEquation, FRAMES, GRIDS, CHART_COLORS, CHART_TYPES, parseDelimited, rowsToSeries,
 } from './smart.js';
-import { pageToDataURL } from './export.js';
+import { pageToDataURL, pageLinks, safeURL } from './export.js';
 import { fileToDataURL } from './imageutil.js';
 import { saveUpload, uid } from './storage.js';
 
@@ -21,7 +22,7 @@ const PALETTES = [
   ['#264653', '#2a9d8f', '#e9c46a', '#f4a261', '#e76f51', '#8d99ae'],
 ];
 
-export const SMART_LABEL = { table: 'ตาราง', chart: 'กราฟ', qr: 'QR Code', equation: 'สมการ' };
+export const SMART_LABEL = { table: 'ตาราง', chart: 'กราฟ', qr: 'QR Code', equation: 'สมการ', icon: 'ไอคอน' };
 
 function brandColors() {
   try { return JSON.parse(localStorage.getItem('lai-brand-colors') || '[]'); } catch { return []; }
@@ -37,8 +38,9 @@ export const features = {
     let obj;
     try {
       if (kind === 'table') { const d = defaultTable(U); await ensureFont(d.fontFamily); obj = buildTable(d); }
-      else if (['bar', 'line', 'pie', 'donut'].includes(kind)) { const d = defaultChart(kind, U); await ensureFont(d.fontFamily); obj = buildChart(d); }
+      else if (CHART_TYPES.some(([k]) => k === kind)) { const d = defaultChart(kind, U); await ensureFont(d.fontFamily); obj = buildChart(d); }
       else if (kind === 'qr') obj = buildQR(defaultQR(U));
+      else if (kind.startsWith('icon-')) obj = await buildIcon({ type: 'icon', name: kind.slice(5), color: '#1f2333', weight: 1.8, size: Math.round(U * 0.2) });
       else if (kind === 'equation') { toast('กำลังเตรียมตัวเขียนสมการ…'); obj = await buildEquation(defaultEquation(U)); }
     } catch (e) {
       console.error(e);
@@ -54,11 +56,12 @@ export const features = {
     if (data.type === 'table') { await ensureFont(data.fontFamily); neu = buildTable(data); }
     if (data.type === 'chart') { await ensureFont(data.fontFamily); neu = buildChart(data); }
     if (data.type === 'qr') neu = buildQR(data);
+    if (data.type === 'icon') { data.size = old.getScaledWidth(); neu = await buildIcon(data); }
     if (data.type === 'equation') {
       data.height = old.getScaledHeight();
       neu = await buildEquation(data);
     }
-    if (data.type !== 'equation') neu.set({ scaleX: old.scaleX, scaleY: old.scaleY });
+    if (data.type !== 'equation' && data.type !== 'icon') neu.set({ scaleX: old.scaleX, scaleY: old.scaleY });
     neu.set({ angle: old.angle, opacity: old.opacity, flipX: old.flipX, flipY: old.flipY, shadow: old.shadow, name: old.name || neu.name });
     const c = old.getCenterPoint();
     const idx = this.canvas.getObjects().indexOf(old);
@@ -94,6 +97,11 @@ export const features = {
           <button class="btn sm" data-t="row-">− แถว</button>
           <button class="btn sm" data-t="col+">${icon('plus', 16)} คอลัมน์</button>
           <button class="btn sm" data-t="col-">− คอลัมน์</button>
+          <button class="btn sm" data-t="import">${icon('upload', 16)} นำเข้า CSV / วางจาก Excel</button>
+        </div>
+        <div class="import-box" data-import hidden>
+          <textarea class="input full code" rows="4" data-paste placeholder="วางตารางที่คัดลอกจาก Excel / Google Sheets ที่นี่"></textarea>
+          <div class="row-gap"><input type="file" accept=".csv,.tsv,.txt,text/csv" data-csv-file><button class="btn sm primary" data-t="import-go">ใช้ข้อมูลนี้</button></div>
         </div>
         <div class="tbl-wrap"><table class="tbl-edit">${d.rows.map((r, ri) => `<tr>${Array.from({ length: cols }, (_, ci) => `<td><input class="input" data-cell="${ri},${ci}" value="${esc(r[ci] ?? '')}" aria-label="แถว ${ri + 1} คอลัมน์ ${ci + 1}"></td>`).join('')}</tr>`).join('')}</table></div>
         <div class="opt-grid">
@@ -123,6 +131,17 @@ export const features = {
     render();
     box.addEventListener('click', async (e) => {
       const t = e.target.closest('[data-t]')?.dataset.t;
+      if (t === 'import') { box.querySelector('[data-import]').hidden = !box.querySelector('[data-import]').hidden; return; }
+      if (t === 'import-go') {
+        const f = box.querySelector('[data-csv-file]').files[0];
+        const rows = parseDelimited(f ? await f.text() : box.querySelector('[data-paste]').value);
+        if (!rows.length) return toast('ไม่พบข้อมูลตาราง', 'error');
+        const cols = Math.max(...rows.map((r) => r.length));
+        read();
+        d.rows = rows.slice(0, 200).map((r) => Array.from({ length: Math.min(cols, 30) }, (_, i) => r[i] ?? ''));
+        toast(`นำเข้า ${d.rows.length} แถว × ${d.rows[0].length} คอลัมน์`, 'ok');
+        return render();
+      }
       if (t) {
         read();
         const cols = Math.max(...d.rows.map((r) => r.length));
@@ -152,7 +171,7 @@ export const features = {
       box.innerHTML = `
         <div class="opt-grid">
           <label>ชนิดกราฟ <select class="select" data-o="chart">
-            ${[['bar', 'กราฟแท่ง'], ['line', 'กราฟเส้น'], ['pie', 'กราฟวงกลม'], ['donut', 'กราฟโดนัท']].map(([k, l]) => `<option value="${k}" ${d.chart === k ? 'selected' : ''}>${l}</option>`).join('')}
+            ${CHART_TYPES.map(([k, l]) => `<option value="${k}" ${d.chart === k ? 'selected' : ''}>${l}</option>`).join('')}
           </select></label>
           <label>ชื่อกราฟ <input class="input" data-o="title" value="${esc(d.title)}"></label>
           <label class="toggle-row"><input type="checkbox" data-o="showValues" ${d.showValues ? 'checked' : ''}> แสดงตัวเลข</label>
@@ -168,7 +187,13 @@ export const features = {
             <input class="input" type="number" step="any" data-v="${i}" value="${d.values[i]}" aria-label="ค่า ${i + 1}">
             <button class="icon-btn sm" data-del="${i}" title="ลบแถว">${icon('trash', 16)}</button>
           </div>`).join('')}</div>
-        <button class="btn sm" data-add>${icon('plus', 16)} เพิ่มข้อมูล</button>
+        <div class="row-gap"><button class="btn sm" data-add>${icon('plus', 16)} เพิ่มข้อมูล</button>
+        <button class="btn sm" data-import-toggle>${icon('upload', 16)} นำเข้าจาก CSV / Excel</button></div>
+        <div class="import-box" data-import hidden>
+          <p class="hint">วางข้อมูลที่คัดลอกจาก Excel / Google Sheets (คอลัมน์แรก = ชื่อ, คอลัมน์สอง = ตัวเลข) หรือเลือกไฟล์ .csv</p>
+          <textarea class="input full code" rows="4" data-paste placeholder="ม.ค.	12&#10;ก.พ.	19"></textarea>
+          <div class="row-gap"><input type="file" accept=".csv,.tsv,.txt,text/csv" data-csv-file><button class="btn sm primary" data-import-go>ใช้ข้อมูลนี้</button></div>
+        </div>
         <div class="modal-actions"><button class="btn" data-no>ยกเลิก</button><button class="btn primary" data-go>ใช้การเปลี่ยนแปลง</button></div>`;
     };
     const read = () => {
@@ -181,6 +206,17 @@ export const features = {
       const t = e.target;
       if (t.closest('[data-pal]')) { read(); d.colors = PALETTES[+t.closest('[data-pal]').dataset.pal]; return render(); }
       if (t.closest('[data-add]')) { read(); d.labels.push(`ข้อมูล ${d.labels.length + 1}`); d.values.push(10); return render(); }
+      if (t.closest('[data-import-toggle]')) { box.querySelector('[data-import]').hidden = !box.querySelector('[data-import]').hidden; return; }
+      if (t.closest('[data-import-go]')) {
+        read();
+        const f = box.querySelector('[data-csv-file]').files[0];
+        const text = f ? await f.text() : box.querySelector('[data-paste]').value;
+        const { labels, values } = rowsToSeries(parseDelimited(text));
+        if (!labels.length) return toast('ไม่พบข้อมูลที่ใช้ได้ (ต้องมีคอลัมน์ชื่อ และคอลัมน์ตัวเลข)', 'error');
+        d.labels = labels; d.values = values;
+        toast(`นำเข้า ${labels.length} แถวแล้ว`, 'ok');
+        return render();
+      }
       if (t.closest('[data-del]')) {
         read();
         if (d.labels.length <= 1) return toast('กราฟต้องมีข้อมูลอย่างน้อย 1 แถว', 'error');
@@ -396,10 +432,11 @@ export const features = {
   toggleList() {
     const t = this.canvas.getActiveObject();
     if (!isText(t)) return;
-    const order = [null, 'bullet', 'number'];
+    const order = [null, 'bullet', 'number', 'check'];
     const next = order[(order.indexOf(t.listType || null) + 1) % order.length];
-    const lines = t.text.split('\n').map((l) => l.replace(/^(•\s|\d+\.\s)/, ''));
-    t.set('text', lines.map((l, i) => (next === 'bullet' ? '• ' : next === 'number' ? `${i + 1}. ` : '') + l).join('\n'));
+    const lines = t.text.split('\n').map((l) => l.replace(/^(•\s|\d+\.\s|[☐☑]\s)/, ''));
+    const prefix = (i) => (next === 'bullet' ? '• ' : next === 'number' ? `${i + 1}. ` : next === 'check' ? '☐ ' : '');
+    t.set('text', lines.map((l, i) => prefix(i) + l).join('\n'));
     t.listType = next;
     if (next && t.textAlign === 'center') t.set('textAlign', 'left');
     t.initDimensions();
@@ -525,6 +562,19 @@ export const features = {
       if (want !== i) return;
       img.src = url;
       ov.querySelector('.present-loading')?.remove();
+      ov.querySelectorAll('.present-link').forEach((x) => x.remove());
+      const links = await pageLinks(this.design, this.design.pages[i].json);
+      if (want !== i) return;
+      const stage = ov.querySelector('.present-stage');
+      const place = () => {
+        const r = img.getBoundingClientRect(), sr = stage.getBoundingClientRect(), f = r.width / this.W;
+        stage.querySelectorAll('.present-link').forEach((x, n) => {
+          const l = links[n];
+          Object.assign(x.style, { left: r.left - sr.left + l.left * f + 'px', top: r.top - sr.top + l.top * f + 'px', width: l.width * f + 'px', height: l.height * f + 'px' });
+        });
+      };
+      links.forEach((l) => { const aEl = document.createElement('a'); aEl.className = 'present-link'; aEl.href = l.url; aEl.target = '_blank'; aEl.rel = 'noopener'; aEl.title = l.url; aEl.addEventListener('click', (e) => e.stopPropagation()); stage.appendChild(aEl); });
+      if (img.complete) place(); else img.onload = place;
       if (i + 1 < n && !cache.has(i + 1)) cache.set(i + 1, pageToDataURL(this.design, this.design.pages[i + 1].json, { format: 'jpeg', multiplier: mult, quality: 0.92 }));
     };
     const go = (d) => { const j = Math.max(0, Math.min(n - 1, i + d)); if (j !== i) { i = j; show(); } };
@@ -592,4 +642,43 @@ export const features = {
       this.commit();
     }
   },
+};
+
+/** Tick / untick the checklist line under the text cursor (or all lines when not editing). */
+features.toggleCheck = function () {
+  const t = this.canvas.getActiveObject();
+  if (!isText(t) || t.listType !== 'check') return;
+  const lines = t.text.split('\n');
+  let target = null;
+  if (t.isEditing) target = t.get2DCursorLocation(t.selectionStart).lineIndex;
+  const flip = (l) => (l.startsWith('☐ ') ? '☑ ' + l.slice(2) : l.startsWith('☑ ') ? '☐ ' + l.slice(2) : l);
+  const allDone = lines.every((l) => l.startsWith('☑ '));
+  const out = lines.map((l, i) => (target === null ? (allDone ? l.replace(/^☑ /, '☐ ') : l.replace(/^☐ /, '☑ ')) : i === target ? flip(l) : l));
+  t.set('text', out.join('\n'));
+  t.initDimensions();
+  this.canvas.requestRenderAll();
+  this.commit();
+};
+
+features.openLinkPopover = function (btn) {
+  const a = this.canvas.getActiveObject();
+  if (!a) return;
+  const el = popover(btn, `<div class="pad">
+    <div class="cp-title">ลิงก์ (คลิกได้ในไฟล์ PDF และโหมดนำเสนอ)</div>
+    <input class="input full" data-url placeholder="https://… หรืออีเมล" value="${esc(a.link || '')}" aria-label="ที่อยู่ลิงก์">
+    <div class="row-gap"><button class="btn sm primary" data-save>บันทึกลิงก์</button>${a.link ? '<button class="btn sm" data-remove>ลบลิงก์</button>' : ''}</div>
+  </div>`, { key: 'link', align: 'right' });
+  const inp = el.querySelector('[data-url]');
+  inp.focus();
+  const save = () => {
+    const u = safeURL(inp.value);
+    a.link = u || undefined;
+    closePopover();
+    this.commit();
+    toast(u ? 'ใส่ลิงก์แล้ว' : 'ลบลิงก์แล้ว');
+  };
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+  el.querySelector('[data-save]').onclick = save;
+  const rm = el.querySelector('[data-remove]');
+  if (rm) rm.onclick = () => { inp.value = ''; save(); };
 };

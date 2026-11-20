@@ -263,13 +263,14 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     assert(o[0] === 200 && o[1] === 1.8, JSON.stringify(o));
     await page.keyboard.press('Escape');
   });
-  await step('เอฟเฟกต์ข้อความสำเร็จรูป 7 แบบ', async () => {
-    for (const fx of ['shadow', 'lift', 'outline', 'hollow', 'neon', 'highlight', 'none']) {
+  await step('เอฟเฟกต์ข้อความสำเร็จรูป 10 แบบ [C2: ตัดซ้อน เงาสะท้อน กลิตช์]', async () => {
+    for (const fx of ['shadow', 'lift', 'outline', 'hollow', 'splice', 'echo', 'glitch', 'neon', 'highlight', 'none']) {
       await page.click('[data-act="pop:effects"]');
       await page.click(`[data-fx="${fx}"]`);
       const o = await ev(() => { const t = __lai.canvas.getObjects()[0]; return { sh: !!t.shadow, st: t.strokeWidth, bg: t.textBackgroundColor }; });
       if (fx === 'shadow' || fx === 'lift' || fx === 'neon') assert(o.sh, fx + ' shadow');
-      if (fx === 'outline' || fx === 'hollow') assert(o.st > 0, fx + ' stroke');
+      if (fx === 'outline' || fx === 'hollow' || fx === 'splice' || fx === 'glitch') assert(o.st > 0, fx + ' stroke');
+      if (fx === 'splice' || fx === 'echo' || fx === 'glitch') assert(o.sh, fx + ' shadow');
       if (fx === 'highlight') assert(o.bg, 'highlight');
       if (fx === 'none') assert(!o.sh && !o.st && !o.bg, 'none');
     }
@@ -304,12 +305,18 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     await page.$eval('[data-curve]', (r) => { r.value = 0; r.dispatchEvent(new Event('input', { bubbles: true })); });
     await page.keyboard.press('Escape');
   });
-  await step('รายการแบบจุด → ตัวเลข → ปกติ', async () => {
+  await step('รายการแบบจุด → ตัวเลข → เช็กบ็อกซ์ [C3] (ติ๊กทั้งหมด/ทีละบรรทัด) → ปกติ', async () => {
     await ev(() => { __lai.canvas.getObjects()[0].set('text', 'หนึ่ง\nสอง\nสาม'); });
     await page.click('[data-act="list"]');
     assert((await ev(() => __lai.canvas.getObjects()[0].text)).startsWith('• หนึ่ง\n• สอง'), 'bullet');
     await page.click('[data-act="list"]');
     assert((await ev(() => __lai.canvas.getObjects()[0].text)).includes('2. สอง'), 'number');
+    await page.click('[data-act="list"]');
+    assert((await ev(() => __lai.canvas.getObjects()[0].text)) === '☐ หนึ่ง\n☐ สอง\n☐ สาม', 'check');
+    await page.click('[data-act="check-item"]');
+    assert((await ev(() => __lai.canvas.getObjects()[0].text)) === '☑ หนึ่ง\n☑ สอง\n☑ สาม', 'tick all');
+    await ev(() => { const t = __lai.canvas.getObjects()[0]; t.enterEditing(); t.selectionStart = t.selectionEnd = 8; __lai.toggleCheck(); t.exitEditing(); });
+    assert((await ev(() => __lai.canvas.getObjects()[0].text)) === '☑ หนึ่ง\n☐ สอง\n☑ สาม', 'untick line 2: ' + (await ev(() => __lai.canvas.getObjects()[0].text)));
     await page.click('[data-act="list"]');
     assert((await ev(() => __lai.canvas.getObjects()[0].text)) === 'หนึ่ง\nสอง\nสาม', 'none');
   });
@@ -443,6 +450,66 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     const d = await ev(() => __lai.canvas.getActiveObject().smart);
     assert(d.chart === 'bar' && d.labels.length === 5 && d.labels[4] === 'มิ.ย.' && d.values[4] === 30 && d.title === 'คะแนนสอบ' && d.colors[0] === '#ff6b4a', JSON.stringify(d));
   });
+  await step('[C4] กราฟอินโฟกราฟิก 5 แบบ: แท่งแนวนอน พื้นที่ แถบความคืบหน้า วงแหวน ภาพสัญลักษณ์', async () => {
+    for (const k of ['hbar', 'area', 'progress', 'ring', 'pictogram']) {
+      await page.click(`[data-act="smart:${k}"]`);
+      await page.waitForFunction((k) => __lai.canvas.getActiveObject()?.smart?.chart === k, k);
+      const n = await ev(() => __lai.canvas.getActiveObject().getObjects().length);
+      assert(n > 4, `${k} has ${n} parts`);
+    }
+  });
+  await step('[C4] นำเข้าข้อมูลกราฟ: วางจาก Excel (TSV) และไฟล์ CSV', async () => {
+    await page.click('[data-act="smart-edit"]');
+    await page.click('[data-import-toggle]');
+    await page.fill('[data-paste]', 'วิชา\tคะแนน\nคณิต\t85\nไทย\t72\nอังกฤษ\t64%');
+    await page.click('[data-import-go]');
+    assert((await page.$$eval('.data-row', (e) => e.length)) === 3, 'tsv rows');
+    const csv = path.join(OUT, 'data.csv');
+    fs.writeFileSync(csv, 'name,value\n"ก, ข",10\nค,20\nง,30\nจ,40\n');
+    await page.click('[data-import-toggle]');
+    await page.setInputFiles('[data-csv-file]', csv);
+    await page.click('[data-import-go]');
+    await page.click('[data-go]');
+    await wait(400);
+    const d = await ev(() => __lai.canvas.getActiveObject().smart);
+    assert(d.labels.join('|') === 'ก, ข|ค|ง|จ' && d.values.join() === '10,20,30,40', JSON.stringify(d.labels) + d.values);
+  });
+  await step('[C4] นำเข้าตารางจาก CSV', async () => {
+    await page.click('[data-act="smart:table"]');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.type === 'table');
+    await page.click('[data-act="smart-edit"]');
+    await page.click('[data-t="import"]');
+    await page.fill('.import-box [data-paste]', 'ชื่อ,อายุ,ห้อง\nเอ,10,1/1\nบี,11,1/2');
+    await page.click('[data-t="import-go"]');
+    await page.click('[data-go]');
+    await wait(400);
+    const rows = await ev(() => __lai.canvas.getActiveObject().smart.rows);
+    assert(rows.length === 3 && rows[0].join() === 'ชื่อ,อายุ,ห้อง' && rows[2][2] === '1/2', JSON.stringify(rows));
+  });
+  await step('[C5] คลังไอคอน 48 แบบ: เพิ่มทุกแบบ ค้นหา เปลี่ยนสีและความหนาเส้น', async () => {
+    const n0 = await objCount();
+    const n = await page.$$eval('[data-act^="smart:icon-"]', (e) => e.length);
+    assert(n === 48, `icons ${n}`);
+    for (let i = 0; i < n; i++) await page.click(`[data-act^="smart:icon-"] >> nth=${i}`);
+    await page.waitForFunction((t) => __lai.canvas.getObjects().length === t, n0 + n);
+    const empty = await ev(() => __lai.canvas.getObjects().filter((o) => o.smart?.type === 'icon' && o.getObjects().length < 2).map((o) => o.smart.name));
+    assert(!empty.length, 'icons without paths: ' + empty);
+    await page.fill('[data-el-search]', 'กล้อง');
+    const vis = await page.$$eval('.el, .smart-btn', (b) => b.filter((x) => !x.hidden).length);
+    assert(vis === 1, `search ${vis}`);
+    await page.fill('[data-el-search]', '');
+    await page.click('[data-act="color:iconColor"]');
+    await page.click('.popover [data-c="#ff3131"]');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.color === '#ff3131');
+    const strokes = await ev(() => __lai.canvas.getActiveObject().getObjects().slice(1).map((o) => o.stroke));
+    assert(strokes.every((c) => c === '#ff3131'), strokes.join());
+    const w0 = await ev(() => Math.round(__lai.canvas.getActiveObject().getScaledWidth()));
+    await page.$eval('[data-icon-weight]', (r) => { r.value = 3; r.dispatchEvent(new Event('change', { bubbles: true })); });
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.weight === 3);
+    const w1 = await ev(() => Math.round(__lai.canvas.getActiveObject().getScaledWidth()));
+    assert(Math.abs(w1 - w0) <= 2 && (await objCount()) === n0 + n, `size ${w0}->${w1}`);
+    await ev(() => { const c = __lai.canvas; c.discardActiveObject(); c.remove(...c.getObjects().filter((o) => o.smart?.type === 'icon')); __lai.commit(); });
+  });
   await step('QR Code: เพิ่ม แก้ลิงก์ สี พื้นโปร่งใส', async () => {
     await page.click('[data-act="smart:qr"]');
     await page.click('[data-act="smart-edit"]');
@@ -516,6 +583,30 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     await page.check('[data-t="grayscale"]');
     const f = await ev(() => __lai.canvas.getObjects()[0].filters.map((x) => x.type));
     assert(f.includes('Brightness') && f.includes('Blur') && f.includes('Grayscale'), f.join());
+    await page.keyboard.press('Escape');
+  });
+  await step('[C1] ปรับรูปเพิ่ม: อุณหภูมิสี ทินต์ คมชัด วิกเน็ต พิกเซล ทูโทน + ฟิลเตอร์อบอุ่น/เย็น/ย้อนยุค และโหลดกลับได้', async () => {
+    await page.click('[data-act="pop:adjust"]');
+    for (const p of ['warm', 'cool', 'retro', 'none']) await page.click(`[data-pre="${p}"]`);
+    for (const [k, v] of [['warmth', 40], ['tint', -30], ['sharpen', 50], ['vignette', 60], ['pixelate', 8]]) {
+      await page.$eval(`[data-k="${k}"]`, (r, v) => { r.value = v; r.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+    }
+    await page.check('[data-t="duotone"]');
+    const f = await ev(() => __lai.canvas.getObjects()[0].filters.map((x) => x.type));
+    for (const t of ['ColorMatrix', 'Convolute', 'Pixelate', 'Vignette']) assert(f.includes(t), `${t} missing: ${f}`);
+    assert(f.filter((x) => x === 'ColorMatrix').length === 3, `colormatrix count ${f}`);
+    await page.keyboard.press('Escape');
+    await ev(() => __lai.commit());
+    await ev(() => __lai.loadPage(__lai.cur));
+    await wait(400);
+    const f2 = await ev(() => __lai.canvas.getObjects()[0].filters.map((x) => x.type));
+    assert(f2.join() === f.join(), `reload ${f2}`);
+    const png = await ev(() => __lai.canvas.toDataURL({ format: 'png' }).length);
+    assert(png > 1000, 'render');
+    await selectIndex(0);
+    await page.click('[data-act="pop:adjust"]');
+    await page.click('[data-pre="none"]');
+    assert((await ev(() => __lai.canvas.getObjects()[0].filters.length)) === 0, 'reset');
     await page.keyboard.press('Escape');
   });
   await step('ครอบตัด: สไลเดอร์และอัตราส่วน 1:1 / 16:9 / รีเซ็ต', async () => {
@@ -945,6 +1036,26 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     await wait(400);
     const b = (await exportAs('svg', { pages: 'cur' })).toString();
     assert(b.includes('<svg') && b.includes('<text') && b.includes('fonts.googleapis.com'), 'svg content');
+  });
+  await step('[C6] ใส่ลิงก์ให้วัตถุ → คลิกได้ในไฟล์ PDF (ปกติและโรงพิมพ์) และโหมดนำเสนอ แล้วลบลิงก์ได้', async () => {
+    await selectIndex(-1);
+    await page.click('[data-act="pop:link"]');
+    await page.fill('.popover [data-url]', 'example.com/ทดสอบ');
+    await page.press('.popover [data-url]', 'Enter');
+    assert((await ev(() => __lai.canvas.getObjects().at(-1).link)) === 'https://example.com/' + encodeURIComponent('ทดสอบ'), 'link set');
+    let b = await exportAs('pdf', { pages: 'cur' });
+    assert(/\/URI\s*\(https:\/\/example\.com/.test(b.toString('latin1')), 'no link annotation in PDF');
+    b = await exportAs('pdf', { pages: 'cur', print: true });
+    assert(/\/URI\s*\(https:\/\/example\.com/.test(b.toString('latin1')), 'no link annotation in print PDF');
+    await page.click('[data-act="present"]');
+    await page.waitForSelector('.present .present-link', { timeout: 20000 });
+    assert((await page.getAttribute('.present .present-link', 'href')).startsWith('https://example.com'), 'present link');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.present', { state: 'detached' });
+    await selectIndex(-1);
+    await page.click('[data-act="pop:link"]');
+    await page.click('.popover [data-remove]');
+    assert(!(await ev(() => __lai.canvas.getObjects().at(-1).link)), 'link removed');
   });
   await step('PDF หลายหน้า (เลือกหน้า 1,3)', async () => {
     const b = await exportAs('pdf', { pages: '1,3' });
