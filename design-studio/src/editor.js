@@ -221,6 +221,14 @@ export class Editor {
       this.commit();
     });
     c.on('object:moving', (e) => this.snap(e.target, e.e));
+    c.on('object:rotating', (e) => {
+      const t = e.target;
+      const ang = ((t.angle % 360) + 360) % 360;
+      let snapped = null;
+      if (e.e && e.e.shiftKey) snapped = Math.round(ang / 15) * 15;
+      else { const near = Math.round(ang / 45) * 45; if (Math.abs(near - ang) < 3) snapped = near; }
+      if (snapped !== null) { t.rotate(snapped % 360); t.setCoords(); }
+    });
     c.on('mouse:up', () => {
       if (this.guides) { this.guides = null; c.requestRenderAll(); }
       this.snapTargets = null;
@@ -328,6 +336,7 @@ export class Editor {
     await this.canvas.loadFromJSON(json);
     this.canvas.getObjects().forEach((o) => this.applyLock(o));
     if (!this.canvas.backgroundColor && !this.canvas.backgroundImage) this.canvas.backgroundColor = '#ffffff';
+    await this.rebuildDirtySmart();
     this.loading = false;
     if (fit) this.fitZoom();
     else this.setZoom(this.zoom);
@@ -438,6 +447,7 @@ export class Editor {
     try {
       await saveDesign(JSON.parse(JSON.stringify(this.design)));
       this.updateStatus('saved');
+      if (this.hIndex > 0) this.maybeAutoVersion().catch(() => {});
     } catch (e) {
       console.error(e);
       this.updateStatus('error');
@@ -656,10 +666,8 @@ export class Editor {
       await this.handleFiles([img.getAsFile()], true);
       return;
     }
-    if (this.clipboard) {
-      e.preventDefault();
-      this.paste();
-    }
+    e.preventDefault();
+    this.paste();
   }
 
   bindKeys() {
@@ -673,6 +681,17 @@ export class Editor {
       const k = e.key.toLowerCase();
       if (mod && k === 'z') { e.preventDefault(); return e.shiftKey ? this.redo() : this.undo(); }
       if (mod && k === 'y') { e.preventDefault(); return this.redo(); }
+      if (mod && k === 'f') { e.preventDefault(); return this.openFindReplace(); }
+      if (mod && (e.code === 'BracketRight' || e.code === 'BracketLeft') && a) {
+        e.preventDefault();
+        const up = e.code === 'BracketRight';
+        return this.arrange(e.shiftKey ? (up ? 'front' : 'back') : up ? 'forward' : 'backward');
+      }
+      if (mod && ['b', 'i', 'u'].includes(k) && isText(a)) {
+        e.preventDefault();
+        return this.ctxAction({ b: 'toggle:bold', i: 'toggle:italic', u: 'toggle:underline' }[k]);
+      }
+      if (mod && e.shiftKey && k === 'l' && a) { e.preventDefault(); return this.toggleLock(); }
       if (mod && k === 's') { e.preventDefault(); this.saveNow(); return toast('บันทึกแล้ว'); }
       if (mod && k === 'c') { if (a) { e.preventDefault(); this.copy(); } return; }
       if (mod && k === 'x') { if (a) { e.preventDefault(); this.copy().then(() => this.deleteSelection()); } return; }
@@ -742,6 +761,8 @@ export class Editor {
         <button data-m="export">${icon('file', 18)} ดาวน์โหลดเป็น PNG / JPG / PDF / SVG</button>
         <button data-m="print">${icon('print', 18)} พิมพ์</button>
         <hr>
+        <button data-m="versions">🕘 ประวัติเวอร์ชัน</button>
+        <button data-m="find">🔍 ค้นหาและแทนที่ข้อความ <kbd>Ctrl+F</kbd></button>
         <button data-m="present">▶ นำเสนอแบบเต็มจอ</button>
         <button data-m="margins">📐 ${this.showMargins ? 'ซ่อน' : 'แสดง'}ระยะขอบปลอดภัย</button>
         <button data-m="shortcuts">⌨️ ปุ่มลัดคีย์บอร์ด</button>
@@ -759,6 +780,8 @@ export class Editor {
       if (m === 'print') printDesign(this.design);
       if (m === 'shortcuts') this.showShortcuts();
       if (m === 'present') this.present();
+      if (m === 'find') this.openFindReplace();
+      if (m === 'versions') this.openVersions();
       if (m === 'margins') this.toggleMargins();
     };
   }
@@ -767,7 +790,9 @@ export class Editor {
     const rows = [
       ['Ctrl + Z / Ctrl + Y', 'เลิกทำ / ทำซ้ำ'], ['Ctrl + C / V / X', 'คัดลอก / วาง / ตัด'], ['Ctrl + D', 'ทำสำเนา'],
       ['Ctrl + G / Ctrl + Shift + G', 'จัดกลุ่ม / ยกเลิกกลุ่ม'], ['Ctrl + A', 'เลือกทั้งหมด'], ['Delete', 'ลบ'],
-      ['ลูกศร (+Shift)', 'ขยับ 1px (10px)'], ['T / R / C', 'เพิ่มข้อความ / สี่เหลี่ยม / วงกลม'],
+      ['ลูกศร (+Shift)', 'ขยับ 1px (10px)'], ['Ctrl + ] / Ctrl + [', 'เลื่อนขึ้น / เลื่อนลง หนึ่งชั้น'], ['Ctrl + Shift + ] / [', 'นำไปบนสุด / ล่างสุด'],
+      ['Ctrl + B / I / U', 'ตัวหนา / เอียง / ขีดเส้นใต้ (ข้อความที่เลือก)'], ['Ctrl + Shift + L', 'ล็อก / ปลดล็อก'], ['Ctrl + F', 'ค้นหาและแทนที่'],
+      ['Shift ขณะหมุน', 'หมุนทีละ 15°'], ['T / R / C', 'เพิ่มข้อความ / สี่เหลี่ยม / วงกลม'],
       ['Ctrl + เลื่อนล้อเมาส์', 'ซูม'], ['Ctrl + 0', 'พอดีหน้าจอ'], ['Alt ขณะลาก', 'ปิดการจัดแนวอัตโนมัติ'],
       ['ดับเบิลคลิกรูป', 'ครอบตัดรูป'], ['Ctrl + V รูปจากคลิปบอร์ด', 'วางรูปลงงาน'],
     ];
@@ -873,9 +898,28 @@ export class Editor {
     const a = this.canvas.getActiveObject();
     if (!a) return;
     this.clipboard = await a.clone(EXTRA);
+    // share with other designs / tabs in this browser
+    try {
+      sessionStorage.removeItem('lai-clipboard');
+      localStorage.setItem('lai-clipboard', JSON.stringify({ at: Date.now(), obj: this.clipboard.toObject(EXTRA) }));
+      this._clipAt = Date.now();
+    } catch { /* too large for storage: keep in-memory only */ }
   }
 
-  async paste() {
+  /** Pick up an element copied in another design (newer than our own copy). */
+  async loadSharedClipboard() {
+    try {
+      const raw = localStorage.getItem('lai-clipboard');
+      if (!raw) return;
+      const { at, obj } = JSON.parse(raw);
+      if (this.clipboard && at <= (this._clipAt || 0)) return;
+      const [o] = await util.enlivenObjects([obj]);
+      if (o) { this.clipboard = o; this._clipAt = at; }
+    } catch { /* ignore broken clipboard */ }
+  }
+
+  async paste({ shared = true } = {}) {
+    if (shared) await this.loadSharedClipboard();
     if (!this.clipboard) return;
     const c = await this.clipboard.clone(EXTRA);
     this.canvas.discardActiveObject();
@@ -899,7 +943,7 @@ export class Editor {
     if (!a) return;
     const saved = this.clipboard;
     this.clipboard = await a.clone(EXTRA);
-    await this.paste();
+    await this.paste({ shared: false });
     this.clipboard = saved;
   }
 

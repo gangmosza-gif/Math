@@ -1,7 +1,7 @@
 import './style.css';
 import { Editor, BLANK_PAGE } from './editor.js';
 import { PRESETS } from './presets.js';
-import { listDesigns, getDesign, saveDesign, deleteDesign, uid } from './storage.js';
+import { listDesigns, getDesign, saveDesign, deleteDesign, deleteVersionsOf, uid } from './storage.js';
 import { icon } from './icons.js';
 import { esc, h, toast, modal, confirmDialog, promptDialog, popover, closePopover } from './ui.js';
 
@@ -170,7 +170,7 @@ function designMenu(anchor, id) {
     }
     if (m === 'dup') { await duplicateDesign(id); toast('ทำสำเนาแล้ว', 'ok'); renderHome(); }
     if (m === 'del') {
-      if (await confirmDialog(`ลบ “${d.name}” ถาวร?`, 'ลบ', true)) { await deleteDesign(id); renderHome(); }
+      if (await confirmDialog(`ลบ “${d.name}” ถาวร?`, 'ลบ', true)) { await deleteDesign(id); await deleteVersionsOf(id); renderHome(); }
     }
   };
 }

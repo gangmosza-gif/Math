@@ -10,7 +10,7 @@ import {
 } from './smart.js';
 import { pageToDataURL, pageLinks, safeURL } from './export.js';
 import { fileToDataURL } from './imageutil.js';
-import { saveUpload, uid } from './storage.js';
+import { saveUpload, uid, saveVersion, listVersions, deleteVersion } from './storage.js';
 
 const isText = (o) => o && (o.type === 'textbox' || o.type === 'itext' || o.type === 'text');
 const isImage = (o) => o && o.type === 'image';
@@ -51,7 +51,24 @@ export const features = {
     return obj;
   },
 
-  async rebuildSmart(old, data) {
+  /** Rebuild tables/charts whose data was edited outside the canvas (find & replace). */
+  async rebuildDirtySmart() {
+    const dirty = this.canvas.getObjects().filter((o) => o.smart && o.smart._dirty);
+    if (!dirty.length) return;
+    const page = this.design.pages[this.cur];
+    const before = page.json;
+    for (const o of dirty) {
+      const d = { ...o.smart };
+      delete d._dirty;
+      await this.rebuildSmart(o, d, { silent: true });
+    }
+    this.canvas.discardActiveObject();
+    page.json = this.serialize();
+    // the rebuild is not a user edit: update history snapshots in place instead of adding an undo step
+    for (const snap of this.history) for (const sp of snap.pages) if (sp.id === page.id && sp.json === before) sp.json = page.json;
+  },
+
+  async rebuildSmart(old, data, { silent = false } = {}) {
     let neu;
     if (data.type === 'table') { await ensureFont(data.fontFamily); neu = buildTable(data); }
     if (data.type === 'chart') { await ensureFont(data.fontFamily); neu = buildChart(data); }
@@ -69,6 +86,7 @@ export const features = {
     this.canvas.insertAt(Math.max(0, idx), neu);
     neu.setPositionByOrigin(c, 'center', 'center');
     neu.setCoords();
+    if (silent) return neu;
     this.canvas.setActiveObject(neu);
     this.canvas.requestRenderAll();
     this.commit();
@@ -850,4 +868,150 @@ features.syncPageNumbers = function () {
     }
     if (live) this.canvas.requestRenderAll();
   }
+};
+
+// ------------------------------------------------------------ find & replace (all pages)
+function walkTexts(objs, fn) {
+  for (const o of objs || []) {
+    if (o.smart && (o.smart.type === 'table' || o.smart.type === 'chart')) {
+      // edit the source data; the element is rebuilt from it when the page is opened
+      const before = JSON.stringify(o.smart);
+      if (o.smart.type === 'table') o.smart.rows = o.smart.rows.map((r) => r.map((c) => fn(String(c))));
+      else { o.smart.title = fn(o.smart.title || ''); o.smart.labels = o.smart.labels.map((l) => fn(String(l))); }
+      if (JSON.stringify(o.smart) !== before) o.smart._dirty = true;
+      continue;
+    }
+    if (typeof o.text === 'string' && /text/i.test(o.type)) {
+      const t = fn(o.text);
+      if (t !== o.text) { if (o.styles && t.length !== o.text.length) o.styles = []; o.text = t; }
+    }
+    if (o.objects && !o.smart) walkTexts(o.objects, fn);
+  }
+}
+
+features.findInDesign = function (q, matchCase) {
+  if (!q) return { total: 0, pages: [] };
+  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), matchCase ? 'g' : 'gi');
+  const pages = [];
+  let total = 0;
+  this.design.pages.forEach((p, i) => {
+    let n = 0;
+    walkTexts(JSON.parse(p.json).objects, (t) => { n += (t.match(re) || []).length; return t; });
+    // a table's cell text is counted once (its child textboxes mirror smart.rows)
+    if (n) { pages.push(i); total += n; }
+  });
+  return { total, pages, re };
+};
+
+features.openFindReplace = function () {
+  this.flushText();
+  this.design.pages[this.cur].json = this.serialize();
+  const m = modal({
+    title: 'ค้นหาและแทนที่',
+    body: `
+      <label class="field">ค้นหา <input class="input full" data-q placeholder="ข้อความที่ต้องการค้นหา"></label>
+      <label class="field">แทนที่ด้วย <input class="input full" data-r placeholder="(เว้นว่าง = ลบข้อความที่พบ)"></label>
+      <label class="toggle-row"><input type="checkbox" data-case> ตรงตัวพิมพ์เล็ก/ใหญ่</label>
+      <p class="hint" data-info>พิมพ์คำที่ต้องการค้นหา</p>
+      <div class="modal-actions"><button class="btn" data-next>ไปหน้าที่พบถัดไป</button><button class="btn primary" data-all>แทนที่ทั้งหมด</button></div>`,
+  });
+  const el = m.el;
+  const q = el.querySelector('[data-q]'), r = el.querySelector('[data-r]'), mc = el.querySelector('[data-case]'), info = el.querySelector('[data-info]');
+  let res = { total: 0, pages: [] };
+  const update = () => {
+    res = this.findInDesign(q.value, mc.checked);
+    info.textContent = !q.value ? 'พิมพ์คำที่ต้องการค้นหา' : res.total ? `พบ ${res.total} จุด ใน ${res.pages.length} หน้า (หน้า ${res.pages.map((x) => x + 1).join(', ')})` : 'ไม่พบข้อความนี้';
+  };
+  q.focus();
+  q.addEventListener('input', update);
+  mc.addEventListener('change', update);
+  el.querySelector('[data-next]').onclick = () => {
+    if (!res.pages.length) return;
+    const nx = res.pages.find((x) => x > this.cur) ?? res.pages[0];
+    this.gotoPage(nx);
+  };
+  el.querySelector('[data-all]').onclick = async () => {
+    if (!res.total) return toast('ไม่พบข้อความที่จะแทนที่', 'error');
+    const rep = r.value;
+    const count = res.total;
+    for (const i of res.pages) {
+      const j = JSON.parse(this.design.pages[i].json);
+      walkTexts(j.objects, (t) => t.replace(res.re, () => rep));
+      this.design.pages[i].json = JSON.stringify(j);
+    }
+    await this.loadPage(this.cur);
+    this.pushHistory();
+    this.scheduleSave();
+    this.design.pages.forEach((p, i) => { if (i !== this.cur && res.pages.includes(i)) pageThumbFor(this, p); });
+    this.scheduleThumb(0);
+    update();
+    toast(`แทนที่แล้ว ${count} จุด`, 'ok');
+  };
+};
+
+function pageThumbFor(ed, p) {
+  import('./export.js').then(({ pageThumb }) => pageThumb(ed.design, p.json, 200).then((u) => { ed.thumbs.set(p.id, u); ed.renderPages(); }));
+}
+
+// ------------------------------------------------------------ version history
+const VERSION_EVERY_MS = 10 * 60 * 1000;
+
+features.maybeAutoVersion = async function () {
+  if (Date.now() - (this._lastVersionAt || 0) < VERSION_EVERY_MS) return;
+  this._lastVersionAt = Date.now();
+  await saveVersion(this.design, 'บันทึกอัตโนมัติ');
+};
+
+features.saveVersionNow = async function (label) {
+  this.flushText();
+  this.design.pages[this.cur].json = this.serialize();
+  await this.saveNow();
+  await saveVersion(this.design, label || 'บันทึกด้วยตนเอง');
+  this._lastVersionAt = Date.now();
+};
+
+features.openVersions = async function () {
+  const m = modal({ title: 'ประวัติเวอร์ชัน', wide: true, body: '<div data-vers><p class="hint">กำลังโหลด…</p></div>' });
+  const box = m.el.querySelector('[data-vers]');
+  const fmtTime = (t) => new Date(t).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+  const render = async () => {
+    const list = await listVersions(this.design.id);
+    box.innerHTML = `
+      <div class="row-gap"><input class="input" data-label placeholder="ชื่อเวอร์ชัน (ไม่บังคับ)" style="flex:1"><button class="btn primary" data-save>บันทึกเวอร์ชันนี้</button></div>
+      <p class="hint">ระบบบันทึกเวอร์ชันอัตโนมัติทุก 10 นาทีที่แก้ไข และก่อนกู้คืนทุกครั้ง (เก็บล่าสุด 30 เวอร์ชัน)</p>
+      ${list.length ? `<div class="ver-list">${list.map((v) => `
+        <div class="ver">
+          <div class="ver-thumb">${v.thumb ? `<img src="${v.thumb}" alt="">` : ''}</div>
+          <div class="ver-info"><b>${esc(v.label || 'เวอร์ชัน')}</b><small>${fmtTime(v.createdAt)} · ${v.snapshot.pages.length} หน้า · ${v.snapshot.width}×${v.snapshot.height}</small></div>
+          <button class="btn sm" data-restore="${v.id}">กู้คืน</button>
+          <button class="icon-btn sm" data-del="${v.id}" title="ลบเวอร์ชันนี้">${icon('trash', 16)}</button>
+        </div>`).join('')}</div>` : '<p class="empty">ยังไม่มีเวอร์ชันที่บันทึกไว้</p>'}`;
+    box._list = list;
+  };
+  await render();
+  box.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-save]')) {
+      await this.saveVersionNow(box.querySelector('[data-label]').value.trim());
+      toast('บันทึกเวอร์ชันแล้ว', 'ok');
+      return render();
+    }
+    const d = e.target.closest('[data-del]');
+    if (d) { await deleteVersion(d.dataset.del); return render(); }
+    const r = e.target.closest('[data-restore]');
+    if (r) {
+      const v = box._list.find((x) => x.id === r.dataset.restore);
+      if (!v) return;
+      await this.saveVersionNow('ก่อนกู้คืน');
+      const snap = JSON.parse(JSON.stringify(v.snapshot));
+      Object.assign(this.design, { name: snap.name, width: snap.width, height: snap.height, mm: snap.mm, pages: snap.pages });
+      this.$('[data-name]').value = this.design.name;
+      this.thumbs.clear();
+      await this.loadPage(0, { fit: true });
+      this.pushHistory();
+      await this.saveNow();
+      this.design.pages.forEach((p) => pageThumbFor(this, p));
+      m.close();
+      toast(`กู้คืนเวอร์ชัน ${fmtTime(v.createdAt)} แล้ว (กดเลิกทำเพื่อย้อนกลับได้)`, 'ok', 4000);
+    }
+  });
 };

@@ -1,10 +1,10 @@
 // Local persistence in the browser (IndexedDB). Falls back to memory if unavailable.
 const DB_NAME = 'lai-studio';
-const DB_VERSION = 1;
-const STORES = ['designs', 'uploads'];
+const DB_VERSION = 2;
+const STORES = ['designs', 'uploads', 'versions'];
 
 let dbPromise = null;
-const memory = { designs: new Map(), uploads: new Map() };
+const memory = { designs: new Map(), uploads: new Map(), versions: new Map() };
 
 function openDB() {
   if (dbPromise) return dbPromise;
@@ -60,3 +60,20 @@ export const saveUpload = (u) => put('uploads', u);
 export const deleteUpload = (id) => del('uploads', id);
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+export const MAX_VERSIONS = 30;
+export const listVersions = async (designId) => ((await getAll('versions')) || []).filter((v) => v.designId === designId).sort((a, b) => b.createdAt - a.createdAt);
+export async function saveVersion(design, label = '') {
+  const v = {
+    id: uid(), designId: design.id, label, createdAt: Date.now(), thumb: design.thumb || null,
+    snapshot: JSON.parse(JSON.stringify({ name: design.name, width: design.width, height: design.height, mm: design.mm || null, pages: design.pages })),
+  };
+  await put('versions', v);
+  const all = await listVersions(design.id);
+  for (const old of all.slice(MAX_VERSIONS)) await del('versions', old.id);
+  return v;
+}
+export const deleteVersion = (id) => del('versions', id);
+export async function deleteVersionsOf(designId) {
+  for (const v of await listVersions(designId)) await del('versions', v.id);
+}
