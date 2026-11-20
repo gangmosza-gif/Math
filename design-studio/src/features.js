@@ -1,9 +1,10 @@
 // Extra editor features, mixed into Editor.prototype.
-import { FabricImage, Path, Point, ActiveSelection } from 'fabric';
+import { FabricImage, Path, Point, ActiveSelection, Group } from 'fabric';
 import { icon } from './icons.js';
 import { esc, toast, modal, popover, closePopover } from './ui.js';
 import { FONTS, ensureFont } from './fonts.js';
 import {
+  buildMockup, defaultMockup,
   buildIcon,
   buildTable, buildChart, buildQR, buildEquation, latexToSVG, placeholderImage,
   defaultTable, defaultChart, defaultQR, defaultEquation, FRAMES, GRIDS, CHART_COLORS, CHART_TYPES, parseDelimited, rowsToSeries,
@@ -22,7 +23,7 @@ const PALETTES = [
   ['#264653', '#2a9d8f', '#e9c46a', '#f4a261', '#e76f51', '#8d99ae'],
 ];
 
-export const SMART_LABEL = { table: 'ตาราง', chart: 'กราฟ', qr: 'QR Code', equation: 'สมการ', icon: 'ไอคอน' };
+export const SMART_LABEL = { table: 'ตาราง', chart: 'กราฟ', qr: 'QR Code', equation: 'สมการ', icon: 'ไอคอน', mockup: 'ม็อกอัป' };
 
 function brandColors() {
   try { return JSON.parse(localStorage.getItem('lai-brand-colors') || '[]'); } catch { return []; }
@@ -40,6 +41,7 @@ export const features = {
       if (kind === 'table') { const d = defaultTable(U); await ensureFont(d.fontFamily); obj = buildTable(d); }
       else if (CHART_TYPES.some(([k]) => k === kind)) { const d = defaultChart(kind, U); await ensureFont(d.fontFamily); obj = buildChart(d); }
       else if (kind === 'qr') obj = buildQR(defaultQR(U));
+      else if (kind.startsWith('mockup-')) obj = await buildMockup(defaultMockup(kind.slice(7), U, placeholderImage()));
       else if (kind.startsWith('icon-')) obj = await buildIcon({ type: 'icon', name: kind.slice(5), color: '#1f2333', weight: 1.8, size: Math.round(U * 0.2) });
       else if (kind === 'equation') { toast('กำลังเตรียมตัวเขียนสมการ…'); obj = await buildEquation(defaultEquation(U)); }
     } catch (e) {
@@ -74,11 +76,12 @@ export const features = {
     if (data.type === 'chart') { await ensureFont(data.fontFamily); neu = buildChart(data); }
     if (data.type === 'qr') neu = buildQR(data);
     if (data.type === 'icon') { data.size = old.getScaledWidth(); neu = await buildIcon(data); }
+    if (data.type === 'mockup') { data.width = old.getScaledWidth(); neu = await buildMockup(data); }
     if (data.type === 'equation') {
       data.height = old.getScaledHeight();
       neu = await buildEquation(data);
     }
-    if (data.type !== 'equation' && data.type !== 'icon') neu.set({ scaleX: old.scaleX, scaleY: old.scaleY });
+    if (!['equation', 'icon', 'mockup'].includes(data.type)) neu.set({ scaleX: old.scaleX, scaleY: old.scaleY });
     neu.set({ angle: old.angle, opacity: old.opacity, flipX: old.flipX, flipY: old.flipY, shadow: old.shadow, name: old.name || neu.name });
     const c = old.getCenterPoint();
     const idx = this.canvas.getObjects().indexOf(old);
@@ -101,6 +104,7 @@ export const features = {
     if (t === 'chart') return this.openChartEditor(obj);
     if (t === 'qr') return this.openQREditor(obj);
     if (t === 'equation') return this.openEquationEditor(obj);
+    if (t === 'mockup') return this.pickMockupImage(obj);
   },
 
   openTableEditor(obj) {
@@ -1045,4 +1049,84 @@ features.pageDescription = function (i) {
   const walk = (objs) => (objs || []).forEach((o) => { if (o.alt) parts.push('รูป: ' + o.alt); else if (typeof o.text === 'string' && o.text.trim()) parts.push(o.text.trim()); if (o.objects && !o.smart) walk(o.objects); });
   walk(JSON.parse(p.json).objects);
   return parts.join(' · ').slice(0, 1000);
+};
+
+// ------------------------------------------------------------ text inside shapes
+const HOLDS_TEXT = ['rect', 'circle', 'ellipse', 'triangle', 'polygon'];
+function isDark(c) {
+  if (typeof c !== 'string' || !/^#[0-9a-f]{6}$/i.test(c)) return false;
+  const n = parseInt(c.slice(1), 16);
+  return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) < 150;
+}
+
+features.canHoldText = function (o) {
+  return !!o && !o.locked && (HOLDS_TEXT.includes(o.type) || (o.type === 'path' && o.fill && o.fill !== 'transparent'));
+};
+
+/** Double-click a shape (or a shape+text group) to type inside it. */
+features.editShapeText = async function (target) {
+  if (!target || target.locked) return;
+  const { Textbox } = await import('fabric');
+  const c = this.canvas;
+  let idx = c.getObjects().indexOf(target);
+  let shape, text;
+  this.loading = true; // structural juggling below is not an undo step
+  if (target.shapeText) {
+    [shape, text] = target.removeAll();
+    c.remove(target);
+    c.insertAt(idx, shape, text);
+  } else {
+    shape = target;
+    shape.setCoords();
+    const w = shape.getScaledWidth(), h = shape.getScaledHeight();
+    text = new Textbox('', {
+      width: Math.max(40, w * 0.78), fontSize: Math.max(12, Math.round(Math.min(w, h) * 0.14)), fontFamily: 'Prompt',
+      textAlign: 'center', fill: isDark(shape.fill) || (shape.fill && shape.fill.colorStops) ? '#ffffff' : '#1f2333', angle: shape.angle, name: 'ข้อความในรูปทรง',
+    });
+    text.setPositionByOrigin(shape.getCenterPoint(), 'center', 'center');
+    c.insertAt(idx + 1, text);
+  }
+  this.loading = false;
+  this._shapeEdit = { shape, text, idx };
+  shape.set({ selectable: false, evented: false });
+  c.setActiveObject(text);
+  text.enterEditing();
+  text.selectAll();
+  c.requestRenderAll();
+};
+
+features.finishShapeText = function () {
+  const { shape, text, idx } = this._shapeEdit;
+  this._shapeEdit = null;
+  const c = this.canvas;
+  shape.set({ selectable: true, evented: true });
+  c.remove(text);
+  if (!text.text.trim()) { c.setActiveObject(shape); return; }
+  // keep the text centred on the shape
+  text.setPositionByOrigin(shape.getCenterPoint(), 'center', 'center');
+  c.remove(shape);
+  const group = new Group([shape, text], { shapeText: true, name: 'รูปทรง + ข้อความ' });
+  c.insertAt(Math.min(idx, c.getObjects().length), group);
+  c.setActiveObject(group);
+  c.requestRenderAll();
+};
+
+features.pickMockupImage = function (obj) {
+  obj = obj || this.canvas.getActiveObject();
+  if (!obj || obj.smart?.type !== 'mockup') return;
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.onchange = async () => {
+    const f = inp.files[0];
+    if (!f) return;
+    const { url } = await fileToDataURL(f);
+    await saveUpload({ id: uid(), url, name: f.name, createdAt: Date.now() });
+    await this.rebuildSmart(obj, { ...obj.smart, src: url });
+  };
+  inp.click();
+};
+
+features.mockupAt = function (pt) {
+  return this.canvas.getObjects().slice().reverse().find((o) => o.smart?.type === 'mockup' && o.visible && !o.locked && o.containsPoint(pt));
 };

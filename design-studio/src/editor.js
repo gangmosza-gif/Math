@@ -14,7 +14,8 @@ import { PRESETS } from './presets.js';
 import { Vignette, warmthMatrix, tintMatrix, duotoneMatrix, sharpen } from './filters.js';
 import { fileToDataURL } from './imageutil.js';
 import { features, SMART_LABEL } from './features.js';
-import { FRAMES, GRIDS } from './smart.js';
+import { rulers } from './rulers.js';
+import { FRAMES, GRIDS, MOCKUPS } from './smart.js';
 
 export { fileToDataURL };
 
@@ -32,7 +33,7 @@ Object.assign(InteractiveFabricObject.ownDefaults, {
   padding: 2,
 });
 
-const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder', 'link', 'alt', 'autoPage'];
+const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder', 'link', 'alt', 'autoPage', 'shapeText'];
 export const BLANK_PAGE = (bg = '#ffffff') => JSON.stringify({ version: '6.9.1', objects: [], background: bg });
 
 const COLORS = [
@@ -77,7 +78,7 @@ function objGradient([a, b]) {
 }
 
 function samePages(a, b) {
-  return a.length === b.length && a.every((p, i) => p.json === b[i].json && p.id === b[i].id && !!p.hidden === !!b[i].hidden && (p.title || '') === (b[i].title || '') && (p.notes || '') === (b[i].notes || ''));
+  return a.length === b.length && a.every((p, i) => p.json === b[i].json && p.id === b[i].id && !!p.hidden === !!b[i].hidden && (p.title || '') === (b[i].title || '') && (p.notes || '') === (b[i].notes || '') && JSON.stringify(p.guides || null) === JSON.stringify(b[i].guides || null));
 }
 
 export class Editor {
@@ -137,8 +138,13 @@ export class Editor {
           </aside>
           <main class="stage">
             <div class="ctxbar" data-ctx></div>
-            <div class="workspace" data-ws>
-              <div class="canvas-wrap" data-wrap><canvas data-canvas></canvas></div>
+            <div class="ws-area" data-ws-area>
+              <canvas class="ruler-h" data-ruler-h title="ลากลงมาเพื่อสร้างเส้นไกด์แนวนอน"></canvas>
+              <canvas class="ruler-v" data-ruler-v title="ลากออกมาเพื่อสร้างเส้นไกด์แนวตั้ง"></canvas>
+              <div class="ruler-corner" title="ดับเบิลคลิกเพื่อล้างเส้นไกด์"></div>
+              <div class="workspace" data-ws>
+                <div class="canvas-wrap" data-wrap><canvas data-canvas></canvas></div>
+              </div>
             </div>
             <footer class="pagebar">
               <div class="pages" data-pages></div>
@@ -181,6 +187,7 @@ export class Editor {
     this.bindUI();
     this.bindKeys();
     this.bindPanelDrag();
+    this.bindRulers();
 
     // generate thumbnails of all pages in background
     await this.loadPage(0, { fit: true });
@@ -236,6 +243,7 @@ export class Editor {
     c.on('text:changed', () => this.commit(true));
     c.on('text:editing:exited', (e) => {
       const t = e.target;
+      if (this._shapeEdit && this._shapeEdit.text === t) { this.finishShapeText(); return this.commit(); }
       if (t && !t.text.trim()) c.remove(t);
       this.commit();
     });
@@ -243,7 +251,7 @@ export class Editor {
       e.path.set({ name: this.drawSettings.mode === 'highlighter' ? 'ปากกาไฮไลต์' : 'ลายเส้น' });
       this.commit();
     });
-    c.on('after:render', ({ ctx }) => { this.drawMargins(ctx); this.drawGuides(ctx); });
+    c.on('after:render', ({ ctx }) => { this.drawMargins(ctx); this.drawUserGuides(ctx); this.drawGuides(ctx); });
     c.on('mouse:down', (e) => {
       if (e.e.button === 2) this.showContextMenu(e);
     });
@@ -251,6 +259,7 @@ export class Editor {
       const t = e.target;
       if (!t || t.locked) return;
       if (t.smart) this.openSmartEditor(t);
+      else if (t.shapeText || this.canHoldText(t)) this.editShapeText(t);
       else if (isImage(t) && t.placeholder) this.pickReplaceImage();
       else if (isImage(t)) this.openImagePopover('crop');
     });
@@ -272,8 +281,9 @@ export class Editor {
   // ---------------------------------------------------------------- snapping
   computeSnapTargets(target) {
     const skip = new Set(target.type === 'activeselection' ? target.getObjects() : [target]);
-    const xs = [0, this.W / 2, this.W];
-    const ys = [0, this.H / 2, this.H];
+    const ug = this.pageGuides();
+    const xs = [0, this.W / 2, this.W, ...ug.v];
+    const ys = [0, this.H / 2, this.H, ...ug.h];
     for (const o of this.canvas.getObjects()) {
       if (skip.has(o) || !o.visible) continue;
       const b = o.getBoundingRect();
@@ -563,6 +573,7 @@ export class Editor {
     this.canvas.calcOffset();
     const zl = this.$('[data-zoom]');
     if (zl) zl.textContent = Math.round(this.zoom * 100) + '%';
+    requestAnimationFrame(() => this.drawRulers());
   }
 
   fitZoom() {
@@ -620,7 +631,16 @@ export class Editor {
       if (act) return this.dropAct(act, e);
       const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/'));
       if (!files.length) return;
-      const target = files.length === 1 ? this.imageAt(this.canvas.getScenePoint(e)) : null;
+      const dropPt = this.canvas.getScenePoint(e);
+      const mock = files.length === 1 ? this.mockupAt(dropPt) : null;
+      if (mock) {
+        fileToDataURL(files[0]).then(async ({ url }) => {
+          await saveUpload({ id: uid(), url, name: files[0].name, createdAt: Date.now() });
+          this.rebuildSmart(mock, { ...mock.smart, src: url });
+        });
+        return;
+      }
+      const target = files.length === 1 ? this.imageAt(dropPt) : null;
       if (target) {
         fileToDataURL(files[0]).then(async ({ url }) => {
           await saveUpload({ id: uid(), url, name: files[0].name, createdAt: Date.now() });
@@ -711,6 +731,7 @@ export class Editor {
       if (mod && k === '0') { e.preventDefault(); return this.fitZoom(); }
       if (k === 'delete' || k === 'backspace') { if (a) { e.preventDefault(); this.deleteSelection(); } return; }
       if (k === 'escape') { if (this._style) { this._style = null; this.$('[data-ws]').classList.remove('paint'); } this.canvas.discardActiveObject(); this.canvas.requestRenderAll(); return; }
+      if (!mod && e.shiftKey && k === 'r') { e.preventDefault(); return this.toggleRulers(); }
       if (!mod && k === 't') { e.preventDefault(); return this.addText('body'); }
       if (!mod && k === 'r') { e.preventDefault(); return this.addShape(0); }
       if (!mod && k === 'c' && !a) { e.preventDefault(); return this.addShape(2); }
@@ -772,6 +793,9 @@ export class Editor {
         <button data-m="versions">🕘 ประวัติเวอร์ชัน</button>
         <button data-m="find">🔍 ค้นหาและแทนที่ข้อความ <kbd>Ctrl+F</kbd></button>
         <button data-m="present">▶ นำเสนอแบบเต็มจอ</button>
+        <button data-m="rulers">📏 ${this.showRulers ? 'ซ่อน' : 'แสดง'}ไม้บรรทัด <kbd>Shift+R</kbd></button>
+        <button data-m="clear-guides">🧹 ล้างเส้นไกด์หน้านี้</button>
+        <button data-m="bleed">✂️ ${this.showBleed ? 'ซ่อน' : 'แสดง'}ระยะตัดตก (งานพิมพ์)</button>
         <button data-m="margins">📐 ${this.showMargins ? 'ซ่อน' : 'แสดง'}ระยะขอบปลอดภัย</button>
         <button data-m="shortcuts">⌨️ ปุ่มลัดคีย์บอร์ด</button>
       </div>`, { key: 'file' });
@@ -791,6 +815,9 @@ export class Editor {
       if (m === 'find') this.openFindReplace();
       if (m === 'versions') this.openVersions();
       if (m === 'margins') this.toggleMargins();
+      if (m === 'rulers') this.toggleRulers();
+      if (m === 'clear-guides') this.clearGuides();
+      if (m === 'bleed') this.toggleBleed();
     };
   }
 
@@ -1011,6 +1038,14 @@ export class Editor {
       const targets = a.type === 'activeselection' ? a.getObjects() : [a];
       for (const o of targets) {
         if (o.locked) continue;
+        if (o.shapeText && ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'underline', 'linethrough', 'textAlign', 'charSpacing', 'lineHeight'].includes(prop)) {
+          const tx = o.getObjects()[1];
+          tx.set(prop, value);
+          tx.initDimensions();
+          o.triggerLayout?.();
+          o.set('dirty', true);
+          continue;
+        }
         let v = value;
         if (Array.isArray(value) && (prop === 'fill' || prop === 'stroke')) v = objGradient(value);
         if (prop === 'fill' && isLineLike(o)) { o.set('stroke', v); continue; }
@@ -1101,6 +1136,7 @@ export class Editor {
     if (isText(a)) return 'text';
     if (a.smart) return 'smart';
     if (isImage(a)) return 'image';
+    if (a.shapeText) return 'shapeText';
     if (a.type === 'group') return 'group';
     if (isLineLike(a)) return 'line';
     return 'shape';
@@ -1139,10 +1175,19 @@ export class Editor {
         ${common()}`;
     } else if (kind === 'smart') {
       const label = SMART_LABEL[a.smart.type] || 'องค์ประกอบ';
-      html = a.smart.type === 'icon' ? `${sw('iconColor', a.smart.color, 'สีไอคอน')}
+      html = a.smart.type === 'mockup' ? `${btn('mock-img', 'replace', 'เปลี่ยนรูปในม็อกอัป', false, 'เปลี่ยนรูป')}
+        <select class="select" data-mock-device aria-label="อุปกรณ์">${MOCKUPS.map(([k, , l]) => `<option value="${k}" ${a.smart.device === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        ${btn('pop:effects', 'effects', 'เงา', false, 'เอฟเฟกต์')}${common()}` : a.smart.type === 'icon' ? `${sw('iconColor', a.smart.color, 'สีไอคอน')}
         <label class="mini">เส้นหนา <input type="range" min="0.5" max="4" step="0.1" value="${a.smart.weight || 1.8}" data-icon-weight></label>
         ${btn('flip:flipX', 'flipH', 'พลิกแนวนอน')}${common()}` : `<button class="btn sm primary-soft" data-act="smart-edit">${icon('pen', 16)} แก้ไข${label}</button>
         ${btn('pop:effects', 'effects', 'เงา', false, 'เอฟเฟกต์')}
+        ${common()}`;
+    } else if (kind === 'shapeText') {
+      const [sh, tx] = a.getObjects();
+      html = `<button class="btn sm primary-soft" data-act="shape-text-edit">${icon('text', 16)} แก้ไขข้อความ</button>
+        ${sw('shapeFill', sh.fill, 'สีรูปทรง')}${sw('textFill', tx.fill, 'สีตัวอักษร')}
+        <button class="font-btn" data-act="pop:font" title="แบบอักษร" style="font-family:'${esc(tx.fontFamily)}'">${esc(tx.fontFamily)} ${icon('down', 14)}</button>
+        ${btn('ungroup', 'ungroup', 'แยกข้อความออกจากรูปทรง', false, 'แยก')}
         ${common()}`;
     } else if (kind === 'group') {
       html = `${btn('ungroup', 'ungroup', 'ยกเลิกกลุ่ม (Ctrl+Shift+G)', false, 'ยกเลิกกลุ่ม')}
@@ -1209,6 +1254,8 @@ export class Editor {
     bar.querySelectorAll('[data-range]').forEach((r) => {
       r.addEventListener('input', () => this.setProp(r.dataset.range, +r.value, { commit: false }));
     });
+    const md = bar.querySelector('[data-mock-device]');
+    if (md) md.addEventListener('change', () => this.rebuildSmart(a, { ...a.smart, device: md.value }));
     const iw = bar.querySelector('[data-icon-weight]');
     if (iw) iw.addEventListener('change', () => this.rebuildSmart(a, { ...a.smart, weight: +iw.value }));
     const ds = bar.querySelector('[data-select="dash"]');
@@ -1227,7 +1274,9 @@ export class Editor {
       case 'pop': return this.openPop(arg, btn);
       case 'duplicate': return this.duplicate();
       case 'smart-edit': return this.openSmartEditor();
+      case 'shape-text-edit': return this.editShapeText(this.canvas.getActiveObject());
       case 'replace-img': return this.pickReplaceImage();
+      case 'mock-img': return this.pickMockupImage();
       case 'list': return this.toggleList();
       case 'check-item': return this.toggleCheck();
       case 'distribute': return this.distribute(arg);
@@ -1282,6 +1331,8 @@ export class Editor {
     let cur;
     if (isBg) cur = this.canvas.backgroundColor;
     else if (prop === 'iconColor') cur = a?.smart?.color;
+    else if (prop === 'shapeFill') cur = a?.getObjects?.()[0]?.fill;
+    else if (prop === 'textFill') cur = a?.getObjects?.()[1]?.fill;
     else if (prop === 'shadow') cur = a?.shadow?.color;
     else cur = a?.[prop];
     const allowNone = prop === 'stroke' || prop === 'textBackgroundColor' || prop === 'fill';
@@ -1309,6 +1360,12 @@ export class Editor {
         if (Array.isArray(v)) this.setBackground(v);
         else if (final) this.setBackground(v || '#ffffff');
         else { this.canvas.backgroundColor = v; this.canvas.backgroundImage = null; this.canvas.requestRenderAll(); }
+      } else if (prop === 'shapeFill' || prop === 'textFill') {
+        const child = a.getObjects()[prop === 'shapeFill' ? 0 : 1];
+        child.set('fill', Array.isArray(v) ? objGradient(v) : v || 'transparent');
+        a.set('dirty', true);
+        this.canvas.requestRenderAll();
+        if (final) this.commit();
       } else if (prop === 'iconColor') {
         if (final && v && iconTarget && iconTarget.canvas) this.rebuildSmart(iconTarget, { ...iconTarget.smart, color: v }).then((n) => { if (n) this.renderCtx(); });
       } else if (prop === 'shadow') {
@@ -1792,6 +1849,8 @@ export class Editor {
         </div>
         <div class="sec-title">ไอคอน</div>
         <div class="el-grid icons">${LIBRARY_ICONS.map(([n, l]) => `<button class="el" data-act="smart:icon-${n}" title="ไอคอน ${l}">${icon(n, 26)}</button>`).join('')}</div>
+        <div class="sec-title">ม็อกอัป (ใส่รูปในอุปกรณ์)</div>
+        <div class="smart-grid">${MOCKUPS.map(([k, ic, l]) => `<button class="smart-btn" data-act="smart:mockup-${k}" title="ม็อกอัป ${l}"><b>${ic}</b><span>${l}</span></button>`).join('')}</div>
         <div class="sec-title">กรอบรูป</div>
         <div class="el-grid">${FRAMES.map(([l, m, r], i) => `<button class="el" data-act="frame:${i}" title="กรอบรูป ${l}"><span class="frame-prev ${m}" style="aspect-ratio:${r}"></span></button>`).join('')}</div>
         <div class="sec-title">ตารางรูป (กริด)</div>
@@ -2186,4 +2245,4 @@ export class Editor {
   }
 }
 
-Object.assign(Editor.prototype, features);
+Object.assign(Editor.prototype, features, rulers);

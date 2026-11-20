@@ -394,6 +394,59 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     const o = await ev(() => { const s = __lai.canvas.getObjects()[0]; return [s.stroke, s.strokeWidth, s.rx, s.ry]; });
     assert(o[0] === '#000000' && o[1] === 12 && o[2] === 40 && o[3] === 40, JSON.stringify(o));
   });
+  await step('[A2] พิมพ์ข้อความในรูปทรง: ดับเบิลคลิก พิมพ์ แก้ซ้ำ ย้ายไปด้วยกัน เปลี่ยนสี/ฟอนต์ แยก และเลิกทำ', async () => {
+    await clearPage();
+    await page.click('[data-act="shape:2"]');
+    let p = await screenPoint(0);
+    await page.mouse.dblclick(p.x, p.y);
+    await page.keyboard.type('สวัสดี');
+    await page.keyboard.press('Escape');
+    await wait(200);
+    let a = await ev(() => { const o = __lai.canvas.getObjects(); return { n: o.length, st: o[0].shapeText, t: o[0].getObjects?.()[1]?.text, c: [o[0].getObjects()[0].getCenterPoint(), o[0].getObjects()[1].getCenterPoint()].map((q) => Math.round(q.x) + ',' + Math.round(q.y)) }; });
+    assert(a.n === 1 && a.st && a.t === 'สวัสดี' && a.c[0] === a.c[1], JSON.stringify(a));
+    p = await screenPoint(0);
+    await page.mouse.dblclick(p.x, p.y);
+    await page.keyboard.press('End');
+    await page.keyboard.type('ครับ');
+    await page.keyboard.press('Escape');
+    await wait(200);
+    assert((await ev(() => __lai.canvas.getObjects()[0].getObjects()[1].text)) === 'สวัสดีครับ', 'edit again');
+    assert((await objCount()) === 1, 'no leftovers');
+    await page.click('[data-act="color:shapeFill"]');
+    await page.click('.popover [data-c="#ffde59"]');
+    await page.keyboard.press('Escape');
+    await page.click('[data-act="color:textFill"]');
+    await page.click('.popover [data-c="#ff3131"]');
+    await page.keyboard.press('Escape');
+    await page.click('[data-act="pop:font"]');
+    await page.click('.font-item[data-f="Mitr"]');
+    await page.waitForFunction(() => __lai.canvas.getObjects()[0].getObjects()[1].fontFamily === 'Mitr');
+    await page.keyboard.press('Escape');
+    a = await ev(() => { const [s, t] = __lai.canvas.getObjects()[0].getObjects(); return [s.fill, t.fill]; });
+    assert(a[0] === '#ffde59' && a[1] === '#ff3131', JSON.stringify(a));
+    await ev(() => { const g = __lai.canvas.getObjects()[0]; g.set({ left: g.left + 100 }); g.setCoords(); __lai.commit(); });
+    a = await ev(() => __lai.canvas.getObjects()[0].getObjects().map((q) => Math.round(q.getCenterPoint().x)));
+    assert(a[0] === a[1], 'move together');
+    await ev(() => __lai.loadPage(__lai.cur));
+    await wait(300);
+    assert(await ev(() => __lai.canvas.getObjects()[0].shapeText && __lai.canvas.getObjects()[0].getObjects()[1].text === 'สวัสดีครับ'), 'saved');
+    const svg = (await exportAs('svg', { pages: 'cur' })).toString();
+    assert(svg.includes('สวัสดีครับ'), 'svg text');
+    await selectIndex(0);
+    await page.click('[data-act="ungroup"]');
+    assert((await objCount()) === 2, 'ungroup');
+    await page.click('[data-act="undo"]');
+    await wait(300);
+    assert((await objCount()) === 1, 'undo ungroup');
+    // an empty edit leaves just the shape
+    await page.click('[data-act="shape:0"]');
+    p = await screenPoint(-1);
+    await page.mouse.dblclick(p.x, p.y);
+    await page.keyboard.press('Escape');
+    await wait(200);
+    assert((await ev(() => __lai.canvas.getObjects().at(-1).type)) === 'rect' && (await objCount()) === 2, 'empty edit');
+    await clearPage();
+  });
   await step('เส้น: สี ความหนา รูปแบบ ทึบ/ประ/จุด', async () => {
     await page.click('[data-act="line:0"]');
     await page.selectOption('[data-select="dash"]', 'dash');
@@ -728,6 +781,46 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     }, b64);
     await page.waitForFunction((n0) => __lai.canvas.getObjects().length === n0 + 1, n0);
   });
+  await step('[A4] ม็อกอัป 6 แบบ: เพิ่ม เปลี่ยนรูป (ปุ่ม/ลากวาง) เปลี่ยนอุปกรณ์ และบันทึก-โหลดได้', async () => {
+    await clearPage();
+    await panel('elements');
+    for (const k of ['phone', 'tablet', 'laptop', 'monitor', 'polaroid', 'frame']) {
+      await page.click(`[data-act="smart:mockup-${k}"]`);
+      await page.waitForFunction((k) => __lai.canvas.getActiveObject()?.smart?.device === k, k);
+    }
+    assert((await objCount()) === 6, 'count');
+    await selectIndex(0);
+    assert((await ev(() => __lai.canvas.getActiveObject().smart.device)) === 'phone', 'select phone: ' + (await ev(() => __lai.canvas.getActiveObject()?.smart?.device)) + ' order ' + (await ev(() => __lai.canvas.getObjects().map((o) => o.smart?.device).join())));
+    const w0 = await ev(() => Math.round(__lai.canvas.getObjects()[0].getScaledWidth()));
+    const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.click('[data-act="mock-img"]')]);
+    await fc.setFiles(IMG2);
+    await page.waitForFunction(() => __lai.canvas.getObjects()[0].getObjects().find((o) => o.type === 'image').getOriginalSize().height === 500).catch(async (e) => {
+      throw new Error('not replaced: ' + (await ev(() => __lai.canvas.getObjects().map((g) => `${g.smart?.device}:${g.getObjects?.().find((o) => o.type === 'image')?.getOriginalSize().height}`).join(' '))));
+    });
+    const shot = await ev(() => { const g = __lai.canvas.getObjects()[0]; const img = g.getObjects().find((o) => o.type === 'image'); return { w: Math.round(g.getScaledWidth()), nh: img.getOriginalSize().height }; });
+    assert(shot.nh === 500 && Math.abs(shot.w - w0) <= 2, JSON.stringify(shot) + ' w0=' + w0);
+    await page.selectOption('[data-mock-device]', 'laptop');
+    await page.waitForFunction(() => __lai.canvas.getObjects()[0].smart.device === 'laptop');
+    // drop a file onto the second mockup
+    // mockups overlap: a dropped file goes to the topmost one (the wall frame)
+    const p = await screenPoint(-1);
+    const b64 = fs.readFileSync(IMG).toString('base64');
+    const src0 = await ev(() => __lai.canvas.getObjects().at(-1).smart.src.length);
+    await page.evaluate(({ p, b64 }) => {
+      const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const dt = new DataTransfer();
+      dt.items.add(new File([bin], 'm.png', { type: 'image/png' }));
+      document.querySelector('[data-ws]').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true }));
+    }, { p, b64 });
+    await page.waitForFunction((n) => __lai.canvas.getObjects().find((o) => o.smart?.device === 'frame')?.smart.src.length !== n, src0);
+    assert((await objCount()) === 6, 'drop added objects');
+    await ev(() => __lai.loadPage(__lai.cur));
+    await wait(500);
+    assert((await ev(() => __lai.canvas.getObjects().filter((o) => o.smart?.type === 'mockup').length)) === 6, 'reload');
+    const png = await exportAs('png', { pages: 'cur' });
+    assert(isPNG(png), 'export');
+    await clearPage();
+  });
   await step('แผงรูปภาพฟรีแสดงรายการรูป', async () => {
     await panel('photos');
     assert((await page.$$eval('[data-act^="photo:"]', (e) => e.length)) > 0, 'no photos listed');
@@ -1048,6 +1141,69 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     await page.click('[data-act="file-menu"]');
     await page.click('.popover [data-m="margins"]');
     assert(await ev(() => !__lai.showMargins), 'margins off');
+  });
+  await step('[A1] ไม้บรรทัด + ลากเส้นไกด์ (สร้าง ย้าย ลบ) + วัตถุสแนปกับไกด์ + แสดงระยะตัดตก', async () => {
+    await page.keyboard.press('Shift+R');
+    await page.waitForSelector('.ws-area.rulers .ruler-h', { state: 'visible' });
+    const cr = await page.locator('.upper-canvas').boundingBox();
+    const z = await ev(() => __lai.zoom);
+    const rh = await page.locator('[data-ruler-h]').boundingBox();
+    const rv = await page.locator('[data-ruler-v]').boundingBox();
+    // drag from top ruler down to y=300 → horizontal guide
+    await page.mouse.move(rh.x + 200, rh.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(cr.x + 200, cr.y + 300 * z, { steps: 5 });
+    await page.mouse.up();
+    // drag from left ruler to x=150 → vertical guide
+    await page.mouse.move(rv.x + 10, rv.y + 200);
+    await page.mouse.down();
+    await page.mouse.move(cr.x + 150 * z, cr.y + 200, { steps: 5 });
+    await page.mouse.up();
+    let g = await ev(() => __lai.pageGuides());
+    assert(g.h.length === 1 && Math.abs(g.h[0] - 300) <= 2 && g.v.length === 1 && Math.abs(g.v[0] - 150) <= 2, JSON.stringify(g));
+    // move the horizontal guide by dragging its marker on the left ruler
+    await page.mouse.move(rv.x + 18, cr.y + g.h[0] * z);
+    await page.mouse.down();
+    await page.mouse.move(cr.x + 300, cr.y + 400 * z, { steps: 5 });
+    await page.mouse.up();
+    g = await ev(() => __lai.pageGuides());
+    assert(g.h.length === 1 && Math.abs(g.h[0] - 400) <= 2, 'move ' + JSON.stringify(g));
+    // snapping: drag a new rect near the vertical guide
+    await panel('elements');
+    await page.click('[data-act="shape:0"]');
+    await ev(() => { const o = __lai.canvas.getActiveObject(); o.set({ left: 300, top: 600 }); o.setCoords(); });
+    const p = await screenPoint(-1);
+    await page.mouse.move(p.x, p.y);
+    await page.mouse.down();
+    const left0 = await ev(() => __lai.canvas.getActiveObject().getBoundingRect().left);
+    await page.mouse.move(p.x - (left0 - 152) * z, p.y, { steps: 6 });
+    await page.mouse.up();
+    const left = await ev(() => Math.round(__lai.canvas.getObjects().at(-1).getBoundingRect().left));
+    assert(Math.abs(left - g.v[0]) <= 1, `snap left=${left} guide=${g.v[0]}`);
+    await page.click('[data-act="undo"]'); await wait(200);
+    await page.click('[data-act="undo"]'); await wait(200);
+    // remove a guide by dragging it back onto the ruler
+    await page.mouse.move(rh.x + g.v[0] * z + (cr.x - rh.x), rh.y + 18);
+    await page.mouse.down();
+    await page.mouse.move(rh.x + 400, rh.y + 8, { steps: 4 });
+    await page.mouse.up();
+    g = await ev(() => __lai.pageGuides());
+    assert(g.v.length === 0 && g.h.length === 1, 'remove ' + JSON.stringify(g));
+    // undo brings it back; guides are saved with the page
+    await page.click('[data-act="undo"]'); await wait(300);
+    assert((await ev(() => __lai.pageGuides().v.length)) === 1, 'undo guide');
+    await page.click('[data-act="file-menu"]');
+    await page.click('.popover [data-m="bleed"]');
+    assert(await ev(() => __lai.showBleed), 'bleed on');
+    const png = await exportAs('png', { pages: 'cur' });
+    assert(isPNG(png), 'export with guides');
+    await page.click('[data-act="file-menu"]');
+    await page.click('.popover [data-m="bleed"]');
+    await page.click('[data-act="file-menu"]');
+    await page.click('.popover [data-m="clear-guides"]');
+    assert((await ev(() => __lai.pageGuides().h.length + __lai.pageGuides().v.length)) === 0, 'clear');
+    await page.keyboard.press('Shift+R');
+    await page.waitForSelector('.ruler-h', { state: 'hidden' });
   });
   await step('โหมดนำเสนอ: เปิด เลื่อนสไลด์ ออก', async () => {
     await page.click('[data-act="present"]');
@@ -1420,6 +1576,40 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     await page.click(`[data-star="${id}"]`);
     await page.waitForSelector(`[data-star="${id}"]:not(.on)`);
   });
+  await step('[A3] โฟลเดอร์: สร้าง ย้ายงานเข้า กรอง เปลี่ยนชื่อ ลบ (งานไม่หาย) และคงอยู่หลังแก้ไขงาน', async () => {
+    const total = await page.$$eval('.design-card', (e) => e.length);
+    await page.click('[data-act="new-folder"]');
+    await page.fill('.modal [data-v]', 'งานโรงเรียน');
+    await page.click('.modal [data-yes]');
+    await page.waitForSelector('.chip.on[data-filter="f:งานโรงเรียน"]');
+    assert((await page.$$eval('.design-card', (e) => e.filter((x) => !x.hidden).length)) === 0, 'empty folder');
+    await page.click('[data-filter="all"]');
+    await page.waitForFunction(() => document.querySelector('[data-filter="all"]').classList.contains('on'));
+    const id = await page.$eval('.design-card [data-menu]', (b) => b.dataset.menu);
+    await page.click(`[data-menu="${id}"]`);
+    await page.click('.popover [data-m="move"]');
+    await page.selectOption('.modal [data-f]', 'งานโรงเรียน');
+    await page.click('.modal [data-go]');
+    await page.waitForSelector('.toast.ok');
+    await page.click('[data-filter="f:งานโรงเรียน"]');
+    await page.waitForFunction(() => [...document.querySelectorAll('.design-card')].filter((x) => !x.hidden).length === 1);
+    await page.click(`[data-open="${id}"]`);
+    await page.waitForSelector('.canvas-container');
+    await page.keyboard.press('r');
+    await ev(() => __lai.saveNow());
+    await page.click('[data-act="home"]');
+    await page.waitForSelector('.chip[data-filter="f:งานโรงเรียน"]');
+    await page.waitForFunction(() => [...document.querySelectorAll('.design-card')].filter((x) => !x.hidden).length === 1);
+    await page.click('[data-act="rename-folder"]');
+    await page.fill('.modal [data-v]', 'ป.2');
+    await page.click('.modal [data-yes]');
+    await page.waitForSelector('.chip.on[data-filter="f:ป.2"]');
+    await page.waitForFunction(() => [...document.querySelectorAll('.design-card')].filter((x) => !x.hidden).length === 1);
+    await page.click('[data-act="delete-folder"]');
+    await page.click('.modal [data-yes]');
+    await page.waitForFunction(() => !document.querySelector('[data-filter^="f:"]'));
+    assert((await page.$$eval('.design-card', (e) => e.filter((x) => !x.hidden).length)) === total, 'designs kept');
+  });
   await step('นำเข้าไฟล์ที่ไม่ใช่โปรเจกต์ต้องแจ้งเตือน', async () => {
     const bad = path.join(OUT, 'bad.json');
     fs.writeFileSync(bad, '{"hello":1}');
@@ -1457,7 +1647,7 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     await d.close();
   });
 
-  await step('[A1] ฟอนต์โหลดช้า: ตารางจัดเรียงใหม่อัตโนมัติเมื่อฟอนต์มาถึง และไม่เพิ่มขั้นเลิกทำ', async () => {
+  await step('[F1] ฟอนต์โหลดช้า: ตารางจัดเรียงใหม่อัตโนมัติเมื่อฟอนต์มาถึง และไม่เพิ่มขั้นเลิกทำ', async () => {
     const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true });
     const p2 = await c2.newPage();
     p2.on('pageerror', (e) => pageErrors.push('slowfont: ' + e.message));

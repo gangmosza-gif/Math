@@ -84,9 +84,47 @@ function relTime(t) {
 }
 
 let homeFilter = 'all';
+
+function storedFolders() {
+  try { return JSON.parse(localStorage.getItem('lai-folders') || '[]'); } catch { return []; }
+}
+function saveFolders(list) {
+  try { localStorage.setItem('lai-folders', JSON.stringify(list)); } catch { /* storage blocked */ }
+}
+function folderList(designs) {
+  return [...new Set([...storedFolders(), ...designs.map((d) => d.folder).filter(Boolean)])].sort((a, b) => a.localeCompare(b, 'th'));
+}
+
+async function moveToFolderDialog(d) {
+  const folders = folderList(await listDesigns());
+  const m = modal({
+    title: `ย้าย “${d.name}” ไปโฟลเดอร์`,
+    body: `<label class="field">โฟลเดอร์ <select class="select" data-f>
+        <option value="">(ไม่อยู่ในโฟลเดอร์)</option>
+        ${folders.map((f) => `<option ${f === d.folder ? 'selected' : ''}>${esc(f)}</option>`).join('')}
+      </select></label>
+      <label class="field">หรือสร้างโฟลเดอร์ใหม่ <input class="input full" data-new placeholder="ชื่อโฟลเดอร์ใหม่"></label>
+      <div class="modal-actions"><button class="btn" data-no>ยกเลิก</button><button class="btn primary" data-go>ย้าย</button></div>`,
+  });
+  m.el.querySelector('[data-no]').onclick = () => m.close();
+  m.el.querySelector('[data-go]').onclick = async () => {
+    const nf = m.el.querySelector('[data-new]').value.trim();
+    const f = nf || m.el.querySelector('[data-f]').value;
+    if (nf) saveFolders([...new Set([...storedFolders(), nf])]);
+    const full = await getDesign(d.id);
+    if (f) full.folder = f; else delete full.folder;
+    await saveDesign(full);
+    m.close();
+    toast(f ? `ย้ายไปโฟลเดอร์ “${f}” แล้ว` : 'ย้ายออกจากโฟลเดอร์แล้ว', 'ok');
+    renderHome();
+  };
+}
 async function renderHome(filter = homeFilter) {
   homeFilter = filter;
   const designs = await listDesigns();
+  const folders = folderList(designs);
+  if (filter.startsWith('f:') && !folders.includes(filter.slice(2))) filter = homeFilter = 'all';
+  const cur = filter.startsWith('f:') ? filter.slice(2) : null;
   app.innerHTML = '';
   const el = h(`
     <div class="home">
@@ -116,8 +154,13 @@ async function renderHome(filter = homeFilter) {
       <section class="home-sec">
         <div class="sec-head"><h2>งานออกแบบของฉัน <small>${designs.length ? `(${designs.length})` : ''}</small></h2>
         ${designs.length ? `<div class="row-gap"><div class="seg sm"><button class="on" data-filter="all">ทั้งหมด</button><button data-filter="star">★ ติดดาว (${designs.filter((d) => d.starred).length})</button></div><input class="input" data-search placeholder="ค้นหางานออกแบบ…" aria-label="ค้นหางานออกแบบ"></div>` : ''}</div>
+        <div class="folder-bar">
+          ${folders.map((f) => `<button class="chip" data-filter="f:${esc(f)}">📁 ${esc(f)} <small>${designs.filter((d) => d.folder === f).length}</small></button>`).join('')}
+          <button class="chip add" data-act="new-folder">+ โฟลเดอร์ใหม่</button>
+          ${cur ? `<span class="grow"></span><button class="btn sm" data-act="rename-folder">เปลี่ยนชื่อโฟลเดอร์</button><button class="btn sm" data-act="delete-folder">ลบโฟลเดอร์</button>` : ''}
+        </div>
         ${designs.length ? `<div class="design-grid">${designs.map((d) => `
-          <div class="design-card" data-name="${esc(d.name.toLowerCase())}" data-starred="${d.starred ? 1 : 0}">
+          <div class="design-card" data-name="${esc(d.name.toLowerCase())}" data-starred="${d.starred ? 1 : 0}" data-folder="${esc(d.folder || '')}">
             <button class="design-thumb" data-open="${d.id}" style="aspect-ratio:${d.width}/${d.height}">${d.thumb ? `<img src="${d.thumb}" alt="">` : ''}</button>
             <div class="design-meta">
               <div><b title="${esc(d.name)}">${esc(d.name)}</b><small>${d.width}×${d.height} · ${d.pages.length} หน้า · ${relTime(d.updatedAt)}</small></div>
@@ -150,12 +193,31 @@ async function renderHome(filter = homeFilter) {
     if (t.dataset.open) return (location.hash = `#/d/${t.dataset.open}`);
     if (t.dataset.menu) return designMenu(t, t.dataset.menu);
     if (t.dataset.act === 'custom') return customSizeDialog();
+    if (t.dataset.act === 'new-folder') {
+      const n = (await promptDialog('ชื่อโฟลเดอร์ใหม่', ''))?.trim();
+      if (!n) return;
+      saveFolders([...new Set([...storedFolders(), n])]);
+      return renderHome('f:' + n);
+    }
+    if (t.dataset.act === 'rename-folder') {
+      const n = (await promptDialog('เปลี่ยนชื่อโฟลเดอร์', cur))?.trim();
+      if (!n || n === cur) return;
+      for (const d of designs.filter((x) => x.folder === cur)) await saveDesign({ ...(await getDesign(d.id)), folder: n });
+      saveFolders(storedFolders().map((f) => (f === cur ? n : f)));
+      return renderHome('f:' + n);
+    }
+    if (t.dataset.act === 'delete-folder') {
+      if (!(await confirmDialog(`ลบโฟลเดอร์ “${cur}”? (งานในโฟลเดอร์จะไม่ถูกลบ แค่ย้ายออกจากโฟลเดอร์)`, 'ลบโฟลเดอร์', true))) return;
+      for (const d of designs.filter((x) => x.folder === cur)) { const full = await getDesign(d.id); delete full.folder; await saveDesign(full); }
+      saveFolders(storedFolders().filter((f) => f !== cur));
+      return renderHome('all');
+    }
     if (t.dataset.act === 'import') return el.querySelector('[data-file]').click();
   });
   const search = el.querySelector('[data-search]');
   const applyFilter = () => {
     const q = search ? search.value.trim().toLowerCase() : '';
-    el.querySelectorAll('.design-card').forEach((c) => { c.hidden = (!!q && !c.dataset.name.includes(q)) || (filter === 'star' && c.dataset.starred !== '1'); });
+    el.querySelectorAll('.design-card').forEach((c) => { c.hidden = (!!q && !c.dataset.name.includes(q)) || (filter === 'star' && c.dataset.starred !== '1') || (cur !== null && c.dataset.folder !== cur); });
     el.querySelectorAll('[data-filter]').forEach((b) => b.classList.toggle('on', b.dataset.filter === filter));
   };
   if (search) search.addEventListener('input', applyFilter);
@@ -172,6 +234,7 @@ function designMenu(anchor, id) {
     <button data-m="open">เปิด</button>
     <button data-m="rename">เปลี่ยนชื่อ</button>
     <button data-m="dup">ทำสำเนา</button>
+    <button data-m="move">📁 ย้ายไปโฟลเดอร์…</button>
     <hr><button data-m="del" class="danger-text">ลบ</button></div>`, { key: 'design-menu', align: 'right' });
   pop.onclick = async (e) => {
     const m = e.target.closest('[data-m]')?.dataset.m;
@@ -185,6 +248,7 @@ function designMenu(anchor, id) {
       if (n && n.trim()) { d.name = n.trim(); await saveDesign(d); renderHome(); }
     }
     if (m === 'dup') { await duplicateDesign(id); toast('ทำสำเนาแล้ว', 'ok'); renderHome(); }
+    if (m === 'move') moveToFolderDialog(d);
     if (m === 'del') {
       if (await confirmDialog(`ลบ “${d.name}” ถาวร?`, 'ลบ', true)) { await deleteDesign(id); await deleteVersionsOf(id); renderHome(); }
     }

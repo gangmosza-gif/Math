@@ -467,3 +467,16 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 .seg.sm button { height: 32px; padding: 0 12px; font-size: 13px; }
 .icon-btn.star { font-size: 18px; color: var(--muted); }
 .icon-btn.star.on { color: #f5a623; }
+/* rulers & guides */
+.ws-area { flex: 1; position: relative; display: flex; min-height: 0; min-width: 0; }
+.ruler-h, .ruler-v, .ruler-corner { position: absolute; display: none; z-index: 2; background: var(--surface); }
+.ruler-h { top: 0; left: 22px; width: calc(100% - 22px); height: 22px; cursor: row-resize; border-bottom: 1px solid var(--line); }
+.ruler-v { top: 22px; left: 0; height: calc(100% - 22px); width: 22px; cursor: col-resize; border-right: 1px solid var(--line); }
+.ruler-corner { top: 0; left: 0; width: 22px; height: 22px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.ws-area.rulers .ruler-h, .ws-area.rulers .ruler-v, .ws-area.rulers .ruler-corner { display: block; }
+.ws-area.rulers .workspace { margin-top: 22px; margin-left: 22px; }
+.folder-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: -4px 0 14px; }
+.chip { height: 32px; padding: 0 12px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.chip small { color: var(--muted); }
+.chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.chip.add { border-style: dashed; color: var(--muted); }

@@ -1,6 +1,6 @@
 // "Smart" elements rebuilt from data: tables, charts, QR codes, equations, image placeholders.
 // Each returns a fabric object carrying `smart = { type, ...data }` so it can be edited later.
-import { Group, Rect, Textbox, Line, Polyline, Circle, Path, FabricText, loadSVGFromString, util } from 'fabric';
+import { Group, Rect, Textbox, Line, Polyline, Polygon, Circle, Path, FabricText, FabricImage, Shadow, loadSVGFromString, util } from 'fabric';
 import qrcode from 'qrcode-generator';
 import { ICON_PATHS } from './icons.js';
 
@@ -399,4 +399,56 @@ export async function buildIcon(d) {
   const k = d.size / 24;
   g.set({ scaleX: k, scaleY: k });
   return g;
+}
+
+// ---------------------------------------------------------------- mockups
+export const MOCKUPS = [
+  ['phone', '📱', 'มือถือ'], ['tablet', '📲', 'แท็บเล็ต'], ['laptop', '💻', 'แล็ปท็อป'],
+  ['monitor', '🖥️', 'จอคอมพิวเตอร์'], ['polaroid', '🖼️', 'รูปโพลารอยด์'], ['frame', '🪟', 'กรอบรูปติดผนัง'],
+];
+
+// device geometry in base units: body parts + the screen rectangle the picture fills
+function mockupParts(device) {
+  const dark = '#1b1d24';
+  switch (device) {
+    case 'phone': return { w: 300, h: 600, screen: [16, 56, 268, 488, 10], parts: [
+      new Rect({ left: 0, top: 0, width: 300, height: 600, rx: 42, ry: 42, fill: dark }),
+      new Rect({ left: 115, top: 24, width: 70, height: 10, rx: 5, ry: 5, fill: '#3a3d48' }),
+      new Circle({ left: 150, top: 572, radius: 11, originX: 'center', originY: 'center', fill: '', stroke: '#3a3d48', strokeWidth: 3 })] };
+    case 'tablet': return { w: 600, h: 800, screen: [36, 56, 528, 688, 6], parts: [
+      new Rect({ left: 0, top: 0, width: 600, height: 800, rx: 40, ry: 40, fill: dark }),
+      new Circle({ left: 300, top: 28, radius: 6, originX: 'center', originY: 'center', fill: '#3a3d48' })] };
+    case 'laptop': return { w: 900, h: 560, screen: [74, 26, 752, 470, 2], parts: [
+      new Rect({ left: 50, top: 0, width: 800, height: 520, rx: 20, ry: 20, fill: dark }),
+      new Polygon([{ x: 0, y: 520 }, { x: 900, y: 520 }, { x: 870, y: 560 }, { x: 30, y: 560 }], { fill: '#c9ccd6' }),
+      new Rect({ left: 390, top: 520, width: 120, height: 10, rx: 4, ry: 4, fill: '#a9adba' })] };
+    case 'monitor': return { w: 800, h: 640, screen: [22, 22, 756, 446, 2], parts: [
+      new Rect({ left: 0, top: 0, width: 800, height: 490, rx: 16, ry: 16, fill: dark }),
+      new Polygon([{ x: 350, y: 490 }, { x: 450, y: 490 }, { x: 470, y: 610 }, { x: 330, y: 610 }], { fill: '#a9adba' }),
+      new Rect({ left: 250, top: 605, width: 300, height: 35, rx: 12, ry: 12, fill: '#c9ccd6' })] };
+    case 'polaroid': return { w: 400, h: 480, screen: [24, 24, 352, 352, 0], parts: [
+      new Rect({ left: 0, top: 0, width: 400, height: 480, fill: '#ffffff', shadow: new Shadow({ color: 'rgba(0,0,0,0.25)', blur: 18, offsetX: 0, offsetY: 8 }) })] };
+    default: return { w: 520, h: 420, screen: [56, 56, 408, 308, 0], parts: [
+      new Rect({ left: 0, top: 0, width: 520, height: 420, fill: '#8b5a2b', shadow: new Shadow({ color: 'rgba(0,0,0,0.3)', blur: 16, offsetX: 0, offsetY: 8 }) }),
+      new Rect({ left: 26, top: 26, width: 468, height: 368, fill: '#f5f1e8' })] };
+  }
+}
+
+export function defaultMockup(device, U, src) {
+  return { type: 'mockup', device, src, width: Math.round(U * (device === 'phone' ? 0.3 : device === 'tablet' ? 0.42 : 0.6)) };
+}
+
+export async function buildMockup(d) {
+  const g = mockupParts(d.device);
+  const [sx, sy, sw, sh, r] = g.screen;
+  const img = await FabricImage.fromURL(d.src, { crossOrigin: 'anonymous' });
+  const { width: nw, height: nh } = img.getOriginalSize();
+  const k = Math.max(sw / nw, sh / nh);
+  const cw = sw / k, ch = sh / k;
+  img.set({ cropX: (nw - cw) / 2, cropY: (nh - ch) / 2, width: cw, height: ch, scaleX: k, scaleY: k, left: sx, top: sy });
+  if (r) img.set('clipPath', new Rect({ width: cw, height: ch, rx: r / k, ry: r / k, originX: 'center', originY: 'center', left: 0, top: 0 }));
+  const group = new Group([...g.parts, img], { smart: { ...d }, name: 'ม็อกอัป' });
+  const s = d.width / g.w;
+  group.set({ scaleX: s, scaleY: s });
+  return group;
 }
