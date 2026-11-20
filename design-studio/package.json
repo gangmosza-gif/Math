@@ -1,0 +1,22 @@
+{
+  "name": "lai-studio",
+  "version": "1.0.0",
+  "description": "Lai Studio - web design editor",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:single": "vite build --mode single",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "fabric": "^6.9.1",
+    "jspdf": "^4.2.1",
+    "jszip": "^3.10.2"
+  },
+  "devDependencies": {
+    "vite": "^8.3.8",
+    "vite-plugin-singlefile": "^2.3.4"
+  },
+  "private": true,
+  "type": "module"
+}
