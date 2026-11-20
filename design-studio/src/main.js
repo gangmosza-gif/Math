@@ -83,7 +83,9 @@ function relTime(t) {
   return new Date(t).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-async function renderHome() {
+let homeFilter = 'all';
+async function renderHome(filter = homeFilter) {
+  homeFilter = filter;
   const designs = await listDesigns();
   app.innerHTML = '';
   const el = h(`
@@ -113,12 +115,13 @@ async function renderHome() {
       </section>
       <section class="home-sec">
         <div class="sec-head"><h2>งานออกแบบของฉัน <small>${designs.length ? `(${designs.length})` : ''}</small></h2>
-        ${designs.length ? '<input class="input" data-search placeholder="ค้นหางานออกแบบ…" aria-label="ค้นหางานออกแบบ">' : ''}</div>
+        ${designs.length ? `<div class="row-gap"><div class="seg sm"><button class="on" data-filter="all">ทั้งหมด</button><button data-filter="star">★ ติดดาว (${designs.filter((d) => d.starred).length})</button></div><input class="input" data-search placeholder="ค้นหางานออกแบบ…" aria-label="ค้นหางานออกแบบ"></div>` : ''}</div>
         ${designs.length ? `<div class="design-grid">${designs.map((d) => `
-          <div class="design-card" data-name="${esc(d.name.toLowerCase())}">
+          <div class="design-card" data-name="${esc(d.name.toLowerCase())}" data-starred="${d.starred ? 1 : 0}">
             <button class="design-thumb" data-open="${d.id}" style="aspect-ratio:${d.width}/${d.height}">${d.thumb ? `<img src="${d.thumb}" alt="">` : ''}</button>
             <div class="design-meta">
               <div><b title="${esc(d.name)}">${esc(d.name)}</b><small>${d.width}×${d.height} · ${d.pages.length} หน้า · ${relTime(d.updatedAt)}</small></div>
+              <button class="icon-btn sm star ${d.starred ? 'on' : ''}" data-star="${d.id}" title="${d.starred ? 'เลิกติดดาว' : 'ติดดาว'}" aria-pressed="${!!d.starred}">${d.starred ? '★' : '☆'}</button>
               <button class="icon-btn sm" data-menu="${d.id}" title="ตัวเลือก">${icon('more', 18)}</button>
             </div>
           </div>`).join('')}</div>` : `<div class="empty-state">ยังไม่มีงานออกแบบ เลือกขนาดด้านบนเพื่อเริ่มได้เลย ✨<br><small>งานทั้งหมดจะบันทึกอัตโนมัติไว้ในเบราว์เซอร์นี้</small></div>`}
@@ -128,6 +131,16 @@ async function renderHome() {
   app.appendChild(el);
 
   el.addEventListener('click', async (e) => {
+    const st = e.target.closest('[data-star]');
+    if (st) {
+      const d = await getDesign(st.dataset.star);
+      if (!d) return;
+      d.starred = !d.starred;
+      await saveDesign(d);
+      return renderHome(filter);
+    }
+    const fb = e.target.closest('[data-filter]');
+    if (fb) return renderHome(fb.dataset.filter);
     const t = e.target.closest('[data-act],[data-preset],[data-open],[data-menu]');
     if (!t) return;
     if (t.dataset.preset !== undefined) {
@@ -140,10 +153,13 @@ async function renderHome() {
     if (t.dataset.act === 'import') return el.querySelector('[data-file]').click();
   });
   const search = el.querySelector('[data-search]');
-  if (search) search.addEventListener('input', () => {
-    const q = search.value.trim().toLowerCase();
-    el.querySelectorAll('.design-card').forEach((c) => { c.hidden = !!q && !c.dataset.name.includes(q); });
-  });
+  const applyFilter = () => {
+    const q = search ? search.value.trim().toLowerCase() : '';
+    el.querySelectorAll('.design-card').forEach((c) => { c.hidden = (!!q && !c.dataset.name.includes(q)) || (filter === 'star' && c.dataset.starred !== '1'); });
+    el.querySelectorAll('[data-filter]').forEach((b) => b.classList.toggle('on', b.dataset.filter === filter));
+  };
+  if (search) search.addEventListener('input', applyFilter);
+  applyFilter();
   el.querySelector('[data-file]').addEventListener('change', (e) => {
     const f = e.target.files[0];
     e.target.value = '';

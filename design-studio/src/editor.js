@@ -331,7 +331,7 @@ export class Editor {
     const json = JSON.parse(this.design.pages[this.cur].json);
     const fontList = fontsInJSON(json);
     this.loading = true;
-    await Promise.race([ensureFonts(fontList), new Promise((r) => setTimeout(r, 1500))]);
+    const fontsReady = await Promise.race([ensureFonts(fontList).then(() => true), new Promise((r) => setTimeout(() => r(false), 1500))]);
     this.canvas.discardActiveObject();
     await this.canvas.loadFromJSON(json);
     this.canvas.getObjects().forEach((o) => this.applyLock(o));
@@ -344,7 +344,15 @@ export class Editor {
     this.renderCtx();
     this.renderPages();
     if (this.panel === 'layers' || this.panel === 'background') this.renderPanel();
-    ensureFonts(fontList).then(() => this.refreshTexts());
+    const pageId = this.design.pages[this.cur].id;
+    ensureFonts(fontList).then(async () => {
+      this.refreshTexts();
+      // fonts arrived after the page was drawn: re-layout tables/charts so text fits their cells
+      if (!fontsReady && this.design.pages[this.cur]?.id === pageId) {
+        const smart = this.canvas.getObjects().filter((o) => o.smart && (o.smart.type === 'table' || o.smart.type === 'chart'));
+        if (smart.length) { smart.forEach((o) => { o.smart._dirty = true; }); await this.rebuildDirtySmart(); this.canvas.requestRenderAll(); }
+      }
+    });
   }
 
   refreshTexts() {
@@ -1171,6 +1179,7 @@ export class Editor {
         ${btn('flip:flipX', 'flipH', 'พลิกแนวนอน')}${btn('flip:flipY', 'flipV', 'พลิกแนวตั้ง')}
         ${btn('pop:effects', 'effects', 'เงา/ขอบ', false, 'เอฟเฟกต์')}
         ${btn('img-bg', 'image', 'ตั้งเป็นพื้นหลัง', false, 'เป็นพื้นหลัง')}
+        ${btn('pop:alt', 'info', a.alt ? 'ข้อความแทนรูป: ' + a.alt : 'ข้อความแทนรูป (Alt text) สำหรับผู้พิการทางสายตา', !!a.alt, 'Alt')}
         ${common()}`;
     } else if (kind === 'line') {
       const dash = a.strokeDashArray ? (a.strokeDashArray[0] < 1 ? 'dot' : 'dash') : 'solid';
@@ -1365,6 +1374,7 @@ export class Editor {
     }
     if (kind === 'position') return this.openPositionPopover(btn);
     if (kind === 'link') return this.openLinkPopover(btn);
+    if (kind === 'alt') return this.openAltPopover(btn);
     if (kind === 'effects') return this.openEffectsPopover(btn);
     if (kind === 'adjust' || kind === 'crop' || kind === 'mask') return this.openImagePopover(kind, btn);
   }

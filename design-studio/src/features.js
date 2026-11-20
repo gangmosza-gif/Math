@@ -601,6 +601,7 @@ export const features = {
       const url = await cache.get(i);
       if (want !== i) return;
       img.src = url;
+      img.alt = this.pageDescription(i);
       ov.querySelector('.present-loading')?.remove();
       ov.querySelectorAll('.present-link').forEach((x) => x.remove());
       const links = await pageLinks(this.design, this.design.pages[i].json);
@@ -1014,4 +1015,34 @@ features.openVersions = async function () {
       toast(`กู้คืนเวอร์ชัน ${fmtTime(v.createdAt)} แล้ว (กดเลิกทำเพื่อย้อนกลับได้)`, 'ok', 4000);
     }
   });
+};
+
+// ------------------------------------------------------------ alt text
+features.openAltPopover = function (btn) {
+  const a = this.canvas.getActiveObject();
+  if (!a) return;
+  const el = popover(btn, `<div class="pad">
+    <div class="cp-title">ข้อความแทนรูป (Alt text)</div>
+    <p class="hint">อธิบายสั้น ๆ ว่ารูปนี้คืออะไร โปรแกรมอ่านหน้าจอจะอ่านข้อความนี้ในโหมดนำเสนอ</p>
+    <textarea class="input full" rows="3" data-alt placeholder="เช่น นักเรียนกำลังทำการทดลองวิทยาศาสตร์">${esc(a.alt || '')}</textarea>
+    <div class="row-gap"><button class="btn sm primary" data-save>บันทึก</button></div>
+  </div>`, { key: 'alt', align: 'right' });
+  const ta = el.querySelector('[data-alt]');
+  ta.focus();
+  el.querySelector('[data-save]').onclick = () => {
+    const v = ta.value.trim();
+    a.alt = v || undefined;
+    closePopover();
+    this.commit();
+    toast(v ? 'บันทึกข้อความแทนรูปแล้ว' : 'ลบข้อความแทนรูปแล้ว');
+  };
+};
+
+/** Accessible description of a page for present mode: title + alt texts + text content. */
+features.pageDescription = function (i) {
+  const p = this.design.pages[i];
+  const parts = [p.title ? `หน้า ${i + 1}: ${p.title}` : `หน้า ${i + 1}`];
+  const walk = (objs) => (objs || []).forEach((o) => { if (o.alt) parts.push('รูป: ' + o.alt); else if (typeof o.text === 'string' && o.text.trim()) parts.push(o.text.trim()); if (o.objects && !o.smart) walk(o.objects); });
+  walk(JSON.parse(p.json).objects);
+  return parts.join(' · ').slice(0, 1000);
 };

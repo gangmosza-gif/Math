@@ -652,6 +652,20 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     const after = await ev(() => { const i = __lai.canvas.getObjects()[0]; return [Math.round(i.getScaledWidth()), Math.round(i.getScaledHeight()), i.mask]; });
     assert(after[0] === before[0] && after[1] === before[1] && after[2] === 'circle', `${before} -> ${after}`);
   });
+  await step('[C15] ข้อความแทนรูป (Alt text): บันทึก โหลดกลับ และใช้ในโหมดนำเสนอ', async () => {
+    await selectIndex(0);
+    await page.click('[data-act="pop:alt"]');
+    await page.fill('.popover [data-alt]', 'ภาพไล่สีทดสอบ');
+    await page.click('.popover [data-save]');
+    await ev(() => __lai.loadPage(__lai.cur));
+    await wait(300);
+    assert((await ev(() => __lai.canvas.getObjects()[0].alt)) === 'ภาพไล่สีทดสอบ', 'alt saved');
+    await page.click('[data-act="present"]');
+    await page.waitForSelector('.present img[src^="data:"]', { timeout: 20000 });
+    assert((await page.getAttribute('.present img[data-img]', 'alt')).includes('รูป: ภาพไล่สีทดสอบ'), 'present alt');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.present', { state: 'detached' });
+  });
   await step('ตั้งรูปเป็นพื้นหลัง และลบภาพพื้นหลัง', async () => {
     await selectIndex(0);
     await page.click('[data-act="img-bg"]');
@@ -1387,6 +1401,25 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     await page.click('.modal [data-yes]');
     await page.waitForFunction((n) => document.querySelectorAll('.design-card').length === n, n0);
   });
+  await step('[C14] ติดดาวงาน และกรองเฉพาะงานติดดาว (คงอยู่หลังแก้ไขงาน)', async () => {
+    const total = await page.$$eval('.design-card', (e) => e.length);
+    const id = await page.$eval('.design-card [data-star]', (b) => b.dataset.star);
+    await page.click(`[data-star="${id}"]`);
+    await page.waitForSelector(`[data-star="${id}"].on`);
+    await page.click('[data-filter="star"]');
+    await page.waitForFunction(() => document.querySelector('[data-filter="star"]')?.classList.contains('on') && [...document.querySelectorAll('.design-card')].filter((x) => !x.hidden).length === 1, null, { timeout: 5000 });
+    await page.click(`[data-open="${id}"]`);
+    await page.waitForSelector('.canvas-container');
+    await page.keyboard.press('r');
+    await ev(() => __lai.saveNow());
+    await page.click('[data-act="home"]');
+    await page.waitForSelector('.design-card');
+    assert(await page.$(`[data-star="${id}"].on`), 'star lost after editing');
+    await page.click('[data-filter="all"]');
+    await page.waitForFunction((t) => [...document.querySelectorAll('.design-card')].filter((x) => !x.hidden).length === t, total, { timeout: 5000 });
+    await page.click(`[data-star="${id}"]`);
+    await page.waitForSelector(`[data-star="${id}"]:not(.on)`);
+  });
   await step('นำเข้าไฟล์ที่ไม่ใช่โปรเจกต์ต้องแจ้งเตือน', async () => {
     const bad = path.join(OUT, 'bad.json');
     fs.writeFileSync(bad, '{"hello":1}');
@@ -1424,6 +1457,32 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     await d.close();
   });
 
+  await step('[A1] ฟอนต์โหลดช้า: ตารางจัดเรียงใหม่อัตโนมัติเมื่อฟอนต์มาถึง และไม่เพิ่มขั้นเลิกทำ', async () => {
+    const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true });
+    const p2 = await c2.newPage();
+    p2.on('pageerror', (e) => pageErrors.push('slowfont: ' + e.message));
+    await p2.goto(URL);
+    await p2.waitForSelector('.preset');
+    await p2.click('.preset[data-preset="0"]');
+    await p2.waitForSelector('.canvas-container');
+    await p2.evaluate(async () => {
+      const L = __lai; await L.addSmart('table'); const t = L.canvas.getActiveObject();
+      await L.rebuildSmart(t, { ...t.smart, fontFamily: 'Taviraj', rows: [['ทดสอบฟอนต์ที่โหลดช้า', 'ข้อมูล'], ['ก', 'ข']] });
+      await L.saveNow();
+    });
+    // reload with the font stylesheet delayed by 4 s
+    const cdp = await c2.newCDPSession(p2);
+    await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
+    await p2.route(/family=Taviraj/, async (route) => { await new Promise((r) => setTimeout(r, 4000)); route.continue().catch(() => {}); });
+    await p2.reload();
+    await p2.waitForFunction(() => window.__lai && __lai.canvas.getObjects().length === 1, null, { timeout: 15000 });
+    const before = await p2.evaluate(() => { window.__t0 = __lai.canvas.getObjects()[0]; return { h: __lai.history.length, fontOk: [...document.fonts].some((f) => f.family.includes('Taviraj') && f.status === 'loaded') }; });
+    assert(!before.fontOk, 'font should still be loading');
+    await p2.waitForFunction(() => __lai.canvas.getObjects()[0] !== window.__t0, null, { timeout: 15000 });
+    const after = await p2.evaluate(() => ({ h: __lai.history.length, dirty: __lai.canvas.getObjects().some((o) => o.smart?._dirty), font: __lai.canvas.getObjects()[0].smart.fontFamily }));
+    assert(after.h === before.h && !after.dirty && after.font === 'Taviraj', JSON.stringify({ before, after }));
+    await c2.close();
+  });
   group('15. ความเสถียร');
   await step('ไม่มี JavaScript error ตลอดการทดสอบ', async () => {
     assert(pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));

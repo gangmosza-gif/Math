@@ -49,16 +49,24 @@ export function fontCssUrl(family) {
   return `https://fonts.googleapis.com/css2?family=${name}${spec}&display=swap`;
 }
 
-const linked = new Set();
+const linked = new Map();
 const loaded = new Map();
 
+/** Add the font's Google Fonts stylesheet; resolves when its @font-face rules are available. */
 function linkFont(family) {
-  if (linked.has(family) || !FONT_NAMES.includes(family)) return;
-  linked.add(family);
+  if (!FONT_NAMES.includes(family)) return Promise.resolve();
+  if (linked.has(family)) return linked.get(family);
   const l = document.createElement('link');
   l.rel = 'stylesheet';
   l.href = fontCssUrl(family);
+  const p = new Promise((resolve) => {
+    l.onload = resolve;
+    l.onerror = resolve;
+    setTimeout(resolve, 15000);
+  });
   document.head.appendChild(l);
+  linked.set(family, p);
+  return p;
 }
 
 /** Link every font stylesheet so the font picker can preview them. */
@@ -71,16 +79,15 @@ export function ensureFont(family) {
   if (!family) return Promise.resolve();
   family = String(family).replace(/["']/g, '').split(',')[0].trim();
   if (loaded.has(family)) return loaded.get(family);
-  linkFont(family);
   const sample = 'กขAaBb1';
-  const p = Promise.race([
+  const p = linkFont(family).then(() => Promise.race([
     Promise.all(
       ['400', '700', 'italic 400', 'italic 700'].map((w) =>
         document.fonts.load(`${w} 40px "${family}"`, sample).catch(() => null)
       )
     ),
-    new Promise((r) => setTimeout(r, 6000)),
-  ]).then(() => cache.clearFontCache(family));
+    new Promise((r) => setTimeout(r, 8000)),
+  ])).then(() => cache.clearFontCache(family));
   loaded.set(family, p);
   return p;
 }
