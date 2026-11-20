@@ -545,17 +545,39 @@ export const features = {
     this.design.pages[this.cur].json = this.serialize();
     const ov = document.createElement('div');
     ov.className = 'present';
-    ov.innerHTML = `<div class="present-stage"><img alt="" data-img><div class="present-loading">กำลังเตรียมสไลด์…</div></div>
-      <div class="present-bar"><button class="icon-btn" data-p="prev" title="ก่อนหน้า (←)">${icon('left')}</button><span data-n></span><button class="icon-btn" data-p="next" title="ถัดไป (→)">${icon('right')}</button><button class="icon-btn" data-p="exit" title="ออก (Esc)">${icon('close')}</button></div>`;
+    ov.innerHTML = `<div class="present-main"><div class="present-stage"><img alt="" data-img><div class="present-loading">กำลังเตรียมสไลด์…</div></div>
+        <aside class="present-notes" data-notes hidden>
+          <div class="pn-head"><b data-ptitle></b><span class="pn-timer" data-timer>00:00</span></div>
+          <div class="pn-notes" data-pnotes></div>
+          <div class="pn-next"><small>สไลด์ถัดไป</small><img alt="" data-next></div>
+        </aside></div>
+      <div class="present-bar"><button class="icon-btn" data-p="prev" title="ก่อนหน้า (←)">${icon('left')}</button><span data-n></span><button class="icon-btn" data-p="next" title="ถัดไป (→)">${icon('right')}</button>
+        <button class="tb-btn" data-p="notes" title="มุมมองผู้นำเสนอ: โน้ต เวลา สไลด์ถัดไป (N)">📝 โน้ต</button>
+        <button class="tb-btn" data-p="auto" title="เล่นอัตโนมัติทุก 5 วินาที (A)">⏯ อัตโนมัติ</button>
+        <button class="icon-btn" data-p="exit" title="ออก (Esc)">${icon('close')}</button></div>`;
+    const order = this.visiblePageIndexes();
+    if (!order.length) return toast('ทุกหน้าถูกซ่อนอยู่ ไม่มีหน้าให้นำเสนอ', 'error');
     document.body.appendChild(ov);
     try { await ov.requestFullscreen?.(); } catch { /* not allowed */ }
-    const n = this.design.pages.length;
+    const n = order.length;
+    let pos = order.findIndex((x) => x >= start);
+    if (pos < 0) pos = 0;
     const mult = Math.min(3, (Math.max(window.screen.width, window.innerWidth) * (window.devicePixelRatio || 1)) / this.W);
     const cache = new Map();
-    let i = start;
+    let i = order[pos];
     const img = ov.querySelector('[data-img]');
     const show = async () => {
-      ov.querySelector('[data-n]').textContent = `${i + 1} / ${n}`;
+      ov.querySelector('[data-n]').textContent = `${pos + 1} / ${n}`;
+      const pg = this.design.pages[i];
+      ov.querySelector('[data-ptitle]').textContent = `หน้า ${i + 1}${pg.title ? ' · ' + pg.title : ''}`;
+      ov.querySelector('[data-pnotes]').textContent = pg.notes || 'ไม่มีโน้ตสำหรับหน้านี้';
+      const nxImg = ov.querySelector('[data-next]');
+      const nxi = order[pos + 1];
+      nxImg.hidden = nxi === undefined;
+      if (nxi !== undefined) {
+        if (!cache.has(nxi)) cache.set(nxi, pageToDataURL(this.design, this.design.pages[nxi].json, { format: 'jpeg', multiplier: mult, quality: 0.92 }));
+        cache.get(nxi).then((u) => { if (order[pos + 1] === nxi) nxImg.src = u; });
+      }
       if (!cache.has(i)) cache.set(i, pageToDataURL(this.design, this.design.pages[i].json, { format: 'jpeg', multiplier: mult, quality: 0.92 }));
       const want = i;
       const url = await cache.get(i);
@@ -575,10 +597,25 @@ export const features = {
       };
       links.forEach((l) => { const aEl = document.createElement('a'); aEl.className = 'present-link'; aEl.href = l.url; aEl.target = '_blank'; aEl.rel = 'noopener'; aEl.title = l.url; aEl.addEventListener('click', (e) => e.stopPropagation()); stage.appendChild(aEl); });
       if (img.complete) place(); else img.onload = place;
-      if (i + 1 < n && !cache.has(i + 1)) cache.set(i + 1, pageToDataURL(this.design, this.design.pages[i + 1].json, { format: 'jpeg', multiplier: mult, quality: 0.92 }));
+      const nx = order[pos + 1];
+      if (nx !== undefined && !cache.has(nx)) cache.set(nx, pageToDataURL(this.design, this.design.pages[nx].json, { format: 'jpeg', multiplier: mult, quality: 0.92 }));
     };
-    const go = (d) => { const j = Math.max(0, Math.min(n - 1, i + d)); if (j !== i) { i = j; show(); } };
+    const go = (d) => { const q = Math.max(0, Math.min(n - 1, pos + d)); if (q !== pos) { pos = q; i = order[pos]; show(); } };
+    const t0 = Date.now();
+    const timer = setInterval(() => {
+      const sec = Math.floor((Date.now() - t0) / 1000);
+      ov.querySelector('[data-timer]').textContent = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+    }, 500);
+    let auto = null;
+    const toggleAuto = () => {
+      if (auto) { clearInterval(auto); auto = null; }
+      else auto = setInterval(() => { if (pos < n - 1) go(1); else { clearInterval(auto); auto = null; ov.querySelector('[data-p="auto"]').classList.remove('on'); } }, this.autoplayMs || 5000);
+      ov.querySelector('[data-p="auto"]').classList.toggle('on', !!auto);
+    };
+    const toggleNotes = () => { const nb = ov.querySelector('[data-notes]'); nb.hidden = !nb.hidden; ov.querySelector('[data-p="notes"]').classList.toggle('on', !nb.hidden); };
     const close = () => {
+      clearInterval(timer);
+      if (auto) clearInterval(auto);
       document.removeEventListener('keydown', key, true);
       if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
       ov.remove();
@@ -588,6 +625,8 @@ export const features = {
       if (['ArrowRight', 'ArrowDown', ' ', 'PageDown', 'Enter'].includes(e.key)) { e.preventDefault(); go(1); }
       if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); go(-1); }
       if (e.key === 'Escape') close();
+      if (e.key === 'n' || e.key === 'N') toggleNotes();
+      if (e.key === 'a' || e.key === 'A') toggleAuto();
     };
     document.addEventListener('keydown', key, true);
     ov.addEventListener('click', (e) => {
@@ -595,6 +634,8 @@ export const features = {
       if (p === 'prev') go(-1);
       else if (p === 'next') go(1);
       else if (p === 'exit') close();
+      else if (p === 'notes') toggleNotes();
+      else if (p === 'auto') toggleAuto();
       else if (e.target.closest('.present-stage')) go(1);
     });
     show();
@@ -681,4 +722,132 @@ features.openLinkPopover = function (btn) {
   el.querySelector('[data-save]').onclick = save;
   const rm = el.querySelector('[data-remove]');
   if (rm) rm.onclick = () => { inp.value = ''; save(); };
+};
+
+// ------------------------------------------------------------ pages: hide, notes, grid view
+features.visiblePageIndexes = function () {
+  return this.design.pages.map((p, i) => (p.hidden ? -1 : i)).filter((i) => i >= 0);
+};
+
+features.togglePageHidden = function () {
+  const p = this.design.pages[this.cur];
+  p.hidden = !p.hidden;
+  if (!p.hidden) delete p.hidden;
+  this.pushHistory();
+  this.scheduleSave();
+  this.renderPages();
+  toast(p.hidden ? 'ซ่อนหน้านี้แล้ว (จะไม่ถูกนำเสนอและดาวน์โหลด)' : 'แสดงหน้านี้แล้ว');
+};
+
+features.openPageNotes = function () {
+  const p = this.design.pages[this.cur];
+  const m = modal({
+    title: `หน้า ${this.cur + 1}: ชื่อหน้าและโน้ต`,
+    body: `
+      <label class="field">ชื่อหน้า <input class="input full" data-title value="${esc(p.title || '')}" placeholder="เช่น บทนำ"></label>
+      <label class="field">โน้ตผู้นำเสนอ (แสดงเฉพาะในมุมมองผู้นำเสนอ) <textarea class="input full" rows="6" data-notes placeholder="สิ่งที่จะพูดในหน้านี้…">${esc(p.notes || '')}</textarea></label>
+      <div class="modal-actions"><button class="btn" data-no>ยกเลิก</button><button class="btn primary" data-go>บันทึก</button></div>`,
+  });
+  m.el.querySelector('[data-no]').onclick = () => m.close();
+  m.el.querySelector('[data-go]').onclick = () => {
+    const t = m.el.querySelector('[data-title]').value.trim();
+    const n = m.el.querySelector('[data-notes]').value.trim();
+    if (t) p.title = t; else delete p.title;
+    if (n) p.notes = n; else delete p.notes;
+    m.close();
+    this.pushHistory();
+    this.scheduleSave();
+    this.renderPages();
+    toast('บันทึกโน้ตแล้ว', 'ok');
+  };
+};
+
+features.openPageGrid = function () {
+  this.flushText();
+  this.design.pages[this.cur].json = this.serialize();
+  const ratio = this.W / this.H;
+  const m = modal({ title: 'ทุกหน้า (ลากเพื่อจัดลำดับ คลิกเพื่อไปหน้านั้น)', wide: true, body: '<div class="page-grid" data-grid></div>' });
+  const grid = m.el.querySelector('[data-grid]');
+  const render = () => {
+    grid.innerHTML = this.design.pages.map((p, i) => `
+      <div class="pg-card ${i === this.cur ? 'active' : ''} ${p.hidden ? 'is-hidden' : ''}" draggable="true" data-i="${i}">
+        <button class="pg-img" data-go="${i}" style="aspect-ratio:${ratio}">${this.thumbs.get(p.id) ? `<img src="${this.thumbs.get(p.id)}" alt="">` : ''}</button>
+        <div class="pg-meta"><b>${i + 1}</b> ${esc(p.title || '')} ${p.hidden ? '<small>ซ่อนอยู่</small>' : ''}</div>
+      </div>`).join('');
+  };
+  render();
+  let from = null;
+  grid.addEventListener('dragstart', (e) => { from = +e.target.closest('[data-i]').dataset.i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(from)); });
+  grid.addEventListener('dragover', (e) => { if (e.target.closest('[data-i]')) e.preventDefault(); });
+  grid.addEventListener('drop', (e) => {
+    const card = e.target.closest('[data-i]');
+    if (!card) return;
+    e.preventDefault();
+    const src = from ?? +e.dataTransfer.getData('text/plain');
+    const to = +card.dataset.i;
+    if (src === to || isNaN(src)) return;
+    this.movePageTo(src, to);
+    render();
+  });
+  grid.addEventListener('click', (e) => {
+    const g = e.target.closest('[data-go]');
+    if (!g) return;
+    m.close();
+    this.gotoPage(+g.dataset.go);
+  });
+};
+
+features.movePageTo = function (from, to) {
+  const pages = this.design.pages;
+  const curId = pages[this.cur].id;
+  const [p] = pages.splice(from, 1);
+  pages.splice(to, 0, p);
+  this.cur = pages.findIndex((x) => x.id === curId);
+  this.renderPages();
+  this.pushHistory();
+  this.scheduleSave();
+};
+
+// ------------------------------------------------------------ automatic page numbers
+const pageNumText = (fmt, i, n) => (fmt === 'nN' ? `${i + 1} / ${n}` : String(i + 1));
+
+features.addPageNumber = async function (fmt = 'n') {
+  const { Textbox } = await import('fabric');
+  const n = this.design.pages.length;
+  await ensureFont('Prompt');
+  const t = new Textbox(pageNumText(fmt, this.cur, n), {
+    fontFamily: 'Prompt', fontSize: Math.round(this.U * 0.035), fill: '#64748b', textAlign: 'center', width: this.U * 0.25,
+    autoPage: fmt, name: 'เลขหน้า', editable: false,
+  });
+  t.setPositionByOrigin(new Point(this.W / 2, this.H - this.U * 0.05), 'center', 'center');
+  this.addObject(t, { center: false });
+  toast('เลขหน้าจะเปลี่ยนเองเมื่อเพิ่ม ลบ หรือย้ายหน้า (คัดลอกไปวางหน้าอื่นได้)');
+  return t;
+};
+
+/** Keep every automatic page-number text in sync with its page position. */
+features.syncPageNumbers = function () {
+  const n = this.design.pages.length;
+  this.design.pages.forEach((p, i) => {
+    if (!p.json.includes('"autoPage"')) return;
+    const j = JSON.parse(p.json);
+    let changed = false;
+    for (const o of j.objects || []) {
+      if (o.autoPage) {
+        const want = pageNumText(o.autoPage, i, n);
+        if (o.text !== want) { o.text = want; changed = true; }
+      }
+    }
+    if (changed) p.json = JSON.stringify(j);
+  });
+  if (this.canvas) {
+    let live = false;
+    for (const o of this.canvas.getObjects()) {
+      if (o.autoPage) {
+        const want = pageNumText(o.autoPage, this.cur, n);
+        if (o.text !== want) { o.set('text', want); o.initDimensions(); live = true; }
+      }
+    }
+    if (live) this.canvas.requestRenderAll();
+  }
 };

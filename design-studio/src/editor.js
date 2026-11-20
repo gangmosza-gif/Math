@@ -76,6 +76,10 @@ function objGradient([a, b]) {
   });
 }
 
+function samePages(a, b) {
+  return a.length === b.length && a.every((p, i) => p.json === b[i].json && p.id === b[i].id && !!p.hidden === !!b[i].hidden && (p.title || '') === (b[i].title || '') && (p.notes || '') === (b[i].notes || ''));
+}
+
 export class Editor {
   constructor(root, design, { onExit }) {
     this.root = root;
@@ -143,6 +147,9 @@ export class Editor {
                 <button class="icon-btn" data-act="page-right" title="เลื่อนหน้าไปขวา">${icon('right', 18)}</button>
                 <button class="icon-btn" data-act="page-dup" title="ทำสำเนาหน้า">${icon('copy', 18)}</button>
                 <button class="icon-btn" data-act="page-del" title="ลบหน้า">${icon('trash', 18)}</button>
+                <button class="icon-btn" data-act="page-hide" title="ซ่อน/แสดงหน้า (หน้าที่ซ่อนจะไม่ถูกนำเสนอและดาวน์โหลด)">${icon('eyeOff', 18)}</button>
+                <button class="icon-btn" data-act="page-notes" title="ชื่อหน้าและโน้ตผู้นำเสนอ">${icon('chat', 18)}</button>
+                <button class="icon-btn" data-act="page-grid" title="ดูทุกหน้าแบบกริด (จัดลำดับได้)">${icon('template', 18)}</button>
               </div>
               <div class="zoom">
                 <button class="icon-btn" data-act="zoom-out" title="ซูมออก">${icon('zoomOut', 18)}</button>
@@ -343,6 +350,7 @@ export class Editor {
   /** Persist current page into the design + history. `soft` = coalesce typing. */
   commit(soft = false) {
     if (this.loading) return;
+    if (!soft) for (const o of this.canvas.getObjects()) if (o.autoPage) { this.syncPageNumbers(); break; }
     this.design.pages[this.cur].json = this.serialize();
     if (soft) {
       clearTimeout(this._softT);
@@ -361,7 +369,7 @@ export class Editor {
 
   snapshot() {
     return {
-      pages: this.design.pages.map((p) => ({ id: p.id, json: p.json })),
+      pages: this.design.pages.map((p) => ({ ...p })),
       cur: this.cur, width: this.W, height: this.H, mm: this.design.mm || null,
     };
   }
@@ -369,7 +377,7 @@ export class Editor {
   pushHistory() {
     const s = this.snapshot();
     const last = this.history[this.hIndex];
-    if (last && last.cur === s.cur && last.pages.length === s.pages.length && last.pages.every((p, i) => p.json === s.pages[i].json && p.id === s.pages[i].id) && last.width === s.width && last.height === s.height) return;
+    if (last && samePages(last.pages, s.pages) && last.width === s.width && last.height === s.height) return;
     this.history = this.history.slice(0, this.hIndex + 1);
     this.history.push(s);
     if (this.history.length > 60) this.history.shift();
@@ -379,11 +387,18 @@ export class Editor {
 
   async restore(s) {
     const dimsChanged = s.width !== this.W || s.height !== this.H;
-    this.design.pages = s.pages.map((p) => ({ id: p.id, json: p.json }));
+    // jump to the page the undone/redone change belongs to (page switches are not undo steps)
+    const now = this.design.pages;
+    let focus = s.cur;
+    if (now.length === s.pages.length && now.every((p, i) => p.id === s.pages[i].id)) {
+      const changed = s.pages.findIndex((p, i) => !samePages([p], [now[i]]));
+      focus = changed >= 0 ? changed : Math.min(this.cur, s.pages.length - 1);
+    }
+    this.design.pages = s.pages.map((p) => ({ ...p }));
     this.design.width = s.width;
     this.design.height = s.height;
     this.design.mm = s.mm;
-    await this.loadPage(s.cur, { fit: dimsChanged });
+    await this.loadPage(focus, { fit: dimsChanged });
     this.updateUndoButtons();
     this.scheduleSave();
     this.scheduleThumb(0);
@@ -392,7 +407,7 @@ export class Editor {
   undo() {
     if (this.canvas.getActiveObject()?.isEditing) return;
     clearTimeout(this._softT);
-    if (this.design.pages[this.cur].json !== this.history[this.hIndex]?.pages[this.cur]?.json) this.pushHistory();
+    if (this.history[this.hIndex] && !samePages(this.design.pages, this.history[this.hIndex].pages)) this.pushHistory();
     if (this.hIndex <= 0) return;
     this.hIndex--;
     this.restore(this.history[this.hIndex]);
@@ -451,14 +466,15 @@ export class Editor {
   }
 
   renderPages() {
+    this.syncPageNumbers();
     const box = this.$('[data-pages]');
     if (!box) return;
     const ratio = this.W / this.H;
     const th = 52;
     box.innerHTML = this.design.pages.map((p, i) => {
       const t = this.thumbs.get(p.id);
-      return `<button class="page-thumb ${i === this.cur ? 'active' : ''}" data-page="${i}" title="หน้า ${i + 1}" style="width:${Math.round(th * ratio)}px;height:${th}px">
-        ${t ? `<img src="${t}" alt="">` : ''}<span>${i + 1}</span></button>`;
+      return `<button class="page-thumb ${i === this.cur ? 'active' : ''} ${p.hidden ? 'is-hidden' : ''}" data-page="${i}" title="หน้า ${i + 1}${p.title ? ': ' + esc(p.title) : ''}${p.hidden ? ' (ซ่อนอยู่)' : ''}" style="width:${Math.round(th * ratio)}px;height:${th}px">
+        ${t ? `<img src="${t}" alt="">` : ''}<span>${i + 1}${p.hidden ? ' 🚫' : ''}${p.notes ? ' 📝' : ''}</span></button>`;
     }).join('') + `<button class="page-add" data-act="page-add" title="เพิ่มหน้า" style="height:${th}px">${icon('plus', 20)}</button>`;
     const act = box.querySelector('.active');
     if (act) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -468,7 +484,6 @@ export class Editor {
     if (i === this.cur) return;
     this.flushText();
     await this.loadPage(i);
-    this.pushHistory();
   }
 
   flushText() {
@@ -476,9 +491,9 @@ export class Editor {
     if (a && a.isEditing) a.exitEditing();
   }
 
-  async addPage(json = BLANK_PAGE(), select = true) {
+  async addPage(json = BLANK_PAGE(), select = true, meta = {}) {
     this.flushText();
-    const p = { id: uid(), json };
+    const p = { id: uid(), json, ...meta };
     this.design.pages.splice(this.cur + 1, 0, p);
     if (select) await this.loadPage(this.cur + 1);
     pageThumb(this.design, json, 200).then((u) => { this.thumbs.set(p.id, u); this.renderPages(); }).catch(() => {});
@@ -489,7 +504,8 @@ export class Editor {
 
   async duplicatePage() {
     const json = this.serialize();
-    await this.addPage(json);
+    const { title, notes, hidden } = this.design.pages[this.cur];
+    await this.addPage(json, true, { title: title ? title + ' (สำเนา)' : undefined, notes, hidden });
     toast('ทำสำเนาหน้าแล้ว');
   }
 
@@ -705,6 +721,9 @@ export class Editor {
       case 'page-del': return this.deletePage();
       case 'page-left': return this.movePage(-1);
       case 'page-right': return this.movePage(1);
+      case 'page-hide': return this.togglePageHidden();
+      case 'page-notes': return this.openPageNotes();
+      case 'page-grid': return this.openPageGrid();
       default:
         if (this.ctxAction(act, btn) !== false) return;
         if (this.panelAction(act, btn) !== false) return;
@@ -1742,6 +1761,8 @@ export class Editor {
         <button class="text-add h1" data-act="text:heading">เพิ่มหัวข้อ</button>
         <button class="text-add h2" data-act="text:sub">เพิ่มหัวข้อย่อย</button>
         <button class="text-add body" data-act="text:body">เพิ่มเนื้อความ</button>
+        <div class="sec-title">เลขหน้าอัตโนมัติ</div>
+        <div class="grid2"><button class="btn sm" data-act="pagenum:n"># เลขหน้า</button><button class="btn sm" data-act="pagenum:nN"># หน้า / ทั้งหมด</button></div>
         <div class="sec-title">ชุดข้อความสำเร็จรูป</div>
         <div class="combo-grid">
           <button class="combo" data-act="combo:0"><b style="font-family:Kanit;font-weight:700;text-shadow:2px 3px 6px rgba(0,0,0,.3)">ลดราคา!</b></button>
@@ -1891,6 +1912,7 @@ export class Editor {
       case 'line': return this.addShape(+arg, LINES);
       case 'sticker': return this.addObject(Object.assign(makeSticker(STICKERS[+arg], this.U * 0.25), { name: 'สติกเกอร์' }));
       case 'text': return this.addText(arg);
+      case 'pagenum': return this.addPageNumber(arg);
       case 'combo': {
         const presets = [
           { text: 'ลดราคา!', fontFamily: 'Kanit', fontWeight: 'bold', fontSize: this.U * 0.12, fill: '#ff3131', shadowCfg: { color: 'rgba(0,0,0,0.3)', blur: 0.02, offsetX: 0.006, offsetY: 0.01 } },
@@ -1969,7 +1991,7 @@ export class Editor {
           <label data-opt="print" class="toggle-row"><input type="checkbox" data-print> PDF สำหรับโรงพิมพ์ (300 dpi + ระยะตัดตก 3 มม. + เครื่องหมายตัด)</label>
           <label data-opt="pages">หน้า
             <select class="select" data-pages-sel>
-              <option value="all">ทุกหน้า (${n} หน้า)</option>
+              <option value="all">ทุกหน้า (${this.visiblePageIndexes().length} หน้า${n - this.visiblePageIndexes().length ? ` ไม่รวม ${n - this.visiblePageIndexes().length} หน้าที่ซ่อน` : ''})</option>
               <option value="cur">เฉพาะหน้าปัจจุบัน (หน้า ${this.cur + 1})</option>
               <option value="custom">เลือกเอง…</option>
             </select>
@@ -2005,7 +2027,8 @@ export class Editor {
     el.querySelector('[data-go]').onclick = async () => {
       const f = fmt();
       const sel = el.querySelector('[data-pages-sel]').value;
-      let pages = [...Array(n).keys()];
+      let pages = this.visiblePageIndexes();
+      if (sel === 'all' && !pages.length) return toast('ทุกหน้าถูกซ่อนอยู่ เลือก “เฉพาะหน้าปัจจุบัน” หรือ “เลือกเอง” แทน', 'error');
       if (sel === 'cur') pages = [this.cur];
       if (sel === 'custom') {
         const out = new Set();

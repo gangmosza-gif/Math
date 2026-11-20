@@ -164,7 +164,7 @@ export async function exportDesign(design, opts) {
 /** Open the browser print dialog with every page as an image. */
 export async function printDesign(design) {
   const imgs = [];
-  for (const p of design.pages) imgs.push(await pageToDataURL(design, p.json, { format: 'png', multiplier: 2 }));
+  for (const p of design.pages.filter((x) => !x.hidden)) imgs.push(await pageToDataURL(design, p.json, { format: 'png', multiplier: 2 }));
   const frame = document.createElement('iframe');
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
   document.body.appendChild(frame);
