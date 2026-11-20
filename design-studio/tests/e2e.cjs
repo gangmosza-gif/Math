@@ -104,6 +104,7 @@ async function exportAs(fmt, opts = {}) {
   if (opts.transparent) await page.check('[data-transparent]');
   if (opts.print) await page.check('[data-print]');
   if (opts.cmyk) await page.check('[data-cmyk]');
+  if (opts.editable === false) await page.uncheck('[data-editable]');
   if (opts.pages) {
     await page.selectOption('[data-pages-sel]', opts.pages === 'cur' ? 'cur' : 'custom');
     if (opts.pages !== 'cur') await page.fill('[data-pages-custom]', opts.pages);
@@ -1592,6 +1593,31 @@ function meanDiff(a, b) {
     const z = await JSZip.loadAsync(b);
     const slides = Object.keys(z.files).filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f));
     assert(slides.length === 3, slides.join());
+  });
+  await step('[B1] PowerPoint แบบแก้ไขได้: ข้อความเป็นข้อความจริง มีโน้ตผู้นำเสนอ ไม่รวมหน้าที่ซ่อน', async () => {
+    await ev(() => { __lai.design.pages[1].notes = 'โน้ตทดสอบ'; __lai.design.pages[2].hidden = true; __lai.pushHistory(); });
+    const z = await JSZip.loadAsync(await exportAs('pptx'));
+    const slides = Object.keys(z.files).filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f));
+    assert(slides.length === 2, 'slides ' + slides.length);
+    const xml = (await Promise.all(slides.map((f) => z.file(f).async('string')))).join('');
+    assert(/<a:t>[^<]+<\/a:t>/.test(xml) && xml.includes('typeface='), 'no editable text');
+    const notes = Object.keys(z.files).filter((f) => /notesSlide\d+\.xml$/.test(f));
+    const nx = (await Promise.all(notes.map((f) => z.file(f).async('string')))).join('');
+    assert(nx.includes('โน้ตทดสอบ'), 'notes missing');
+    await ev(() => { delete __lai.design.pages[2].hidden; __lai.pushHistory(); });
+  });
+  await step('[B1] PowerPoint แบบภาพ (ไม่ติ๊กแก้ไขได้) ยังใช้งานได้', async () => {
+    const z = await JSZip.loadAsync(await exportAs('pptx', { editable: false }));
+    const xml = await z.file('ppt/slides/slide1.xml').async('string');
+    assert(xml.includes('<p:pic>') && !/<a:t>[^<]+<\/a:t>/.test(xml), 'image-only slide expected');
+  });
+  await step('[B2] Word (.docx): ข้อความแก้ไขได้ ฟอนต์ไทย (complex script) หน้าละ 1 หน้า', async () => {
+    const b = await exportAs('docx');
+    const z = await JSZip.loadAsync(b);
+    const xml = await z.file('word/document.xml').async('string');
+    const sections = (xml.match(/<w:sectPr/g) || []).length;
+    assert(sections === 3, 'sections ' + sections);
+    assert(/<w:t[^>]*>[^<]+<\/w:t>/.test(xml) && /w:cs="/.test(xml) && xml.includes('w:framePr'), 'docx text/fonts/frames');
   });
   await step('ไฟล์โปรเจกต์ .json แล้วนำเข้ากลับได้ครบ', async () => {
     const b = await exportAs('json');

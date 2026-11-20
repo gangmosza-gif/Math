@@ -2091,7 +2091,8 @@ export class Editor {
       ['pdf', 'PDF', 'สำหรับพิมพ์ / เอกสาร หลายหน้า'],
       ['svg', 'SVG', 'ภาพเวกเตอร์ ขยายได้ไม่แตก'],
       ['webp', 'WEBP', 'ภาพเว็บ ไฟล์เล็กมาก'],
-      ['pptx', 'PowerPoint', 'ไฟล์ .pptx เปิดใน PowerPoint / Google Slides'],
+      ['pptx', 'PowerPoint', 'ไฟล์ .pptx แก้ข้อความ ตาราง กราฟ ได้'],
+      ['docx', 'Word', 'ไฟล์ .docx แก้ข้อความ ตาราง กราฟ ได้'],
       ['json', 'โปรเจกต์', 'ไฟล์ .json เปิดแก้ไขต่อได้'],
     ];
     const m = modal({
@@ -2108,6 +2109,7 @@ export class Editor {
             </select>
           </label>
           <label data-opt="quality" hidden>คุณภาพ <input type="range" min="40" max="100" value="92" data-quality><output>92</output></label>
+          <label data-opt="editable" class="toggle-row" hidden><input type="checkbox" data-editable checked> แก้ไขได้ (ข้อความ ตาราง กราฟ รูปทรง เป็นวัตถุจริง) — ถ้าไม่ติ๊ก แต่ละหน้าจะเป็นภาพเดียว</label>
           <label data-opt="transparent" class="toggle-row"><input type="checkbox" data-transparent> พื้นหลังโปร่งใส</label>
           <label data-opt="print" class="toggle-row"><input type="checkbox" data-print> PDF สำหรับโรงพิมพ์ (300 dpi + ระยะตัดตก 3 มม. + เครื่องหมายตัด)</label>
           <label data-opt="cmyk" class="toggle-row" hidden><input type="checkbox" data-cmyk> โหมดสี CMYK (สำหรับโรงพิมพ์ระบบออฟเซ็ต)</label>
@@ -2131,13 +2133,16 @@ export class Editor {
       el.querySelector('[data-opt="scale"]').hidden = f === 'svg' || f === 'json' || print;
       el.querySelector('[data-opt="print"]').hidden = f !== 'pdf';
       el.querySelector('[data-opt="cmyk"]').hidden = !print;
+      el.querySelector('[data-opt="editable"]').hidden = f !== 'pptx';
+      if (f === 'docx') el.querySelector('[data-opt="scale"]').hidden = true;
       el.querySelector('[data-opt="quality"]').hidden = !(f === 'jpg' || f === 'webp');
       el.querySelector('[data-opt="transparent"]').hidden = f !== 'png';
       el.querySelector('[data-opt="pages"]').hidden = f === 'json';
       const multi = n > 1 && el.querySelector('[data-pages-sel]').value !== 'cur';
       el.querySelector('[data-ex-hint]').textContent =
         f === 'pdf' ? `ทุกหน้าที่เลือกจะรวมเป็นไฟล์ PDF ไฟล์เดียว${this.design.mm ? ` ขนาด ${this.design.mm[0]}×${this.design.mm[1]} มม.` : ''}` :
-        f === 'pptx' ? 'แต่ละหน้าจะเป็น 1 สไลด์ (เป็นภาพ แก้ข้อความใน PowerPoint ไม่ได้)' :
+        f === 'pptx' ? 'แต่ละหน้าเป็น 1 สไลด์ ข้อความ ตาราง กราฟ รูปทรงแก้ไขได้ โน้ตผู้นำเสนอติดไปด้วย · ฟอนต์ไทยต้องติดตั้งในเครื่องที่เปิดไฟล์ (ดาวน์โหลดฟรีจาก Google Fonts)' :
+        f === 'docx' ? 'แต่ละหน้าเป็น 1 หน้า Word ข้อความ ตาราง กราฟ แก้ไขได้ จัดวางตำแหน่งเหมือนงานออกแบบ · ฟอนต์ไทยต้องติดตั้งในเครื่องที่เปิดไฟล์' :
         f === 'json' ? 'เก็บไฟล์นี้ไว้ แล้วเปิดด้วยเมนู “เปิดไฟล์โปรเจกต์” เพื่อแก้ไขต่อได้ทุกเครื่อง' :
         multi ? 'หลายหน้าจะถูกรวมเป็นไฟล์ .zip' : '';
     };
@@ -2174,6 +2179,7 @@ export class Editor {
           transparent: el.querySelector('[data-transparent]').checked,
           print: el.querySelector('[data-print]').checked,
           cmyk: el.querySelector('[data-cmyk]').checked,
+          editable: el.querySelector('[data-editable]').checked,
           onProgress: (i, total) => { go.textContent = total > 1 ? `กำลังสร้าง ${Math.min(i + 1, total)}/${total}…` : 'กำลังสร้าง…'; },
         });
         m.close();

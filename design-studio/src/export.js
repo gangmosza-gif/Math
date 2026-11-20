@@ -101,6 +101,14 @@ export async function exportDesign(design, opts) {
     return downloadBlob(blob, `${name}.lai.json`);
   }
 
+  if (format === 'pptx' && opts.editable !== false) {
+    const { buildPptx } = await import('./office.js');
+    return downloadBlob(await buildPptx(design, list.map((x) => x.page), onProgress), `${name}.pptx`);
+  }
+  if (format === 'docx') {
+    const { buildDocx } = await import('./office.js');
+    return downloadBlob(await buildDocx(design, list.map((x) => x.page), onProgress), `${name}.docx`);
+  }
   if (format === 'pptx') {
     const { default: PptxGenJS } = await import('pptxgenjs');
     const pptx = new PptxGenJS();
