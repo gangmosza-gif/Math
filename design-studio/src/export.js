@@ -2,6 +2,7 @@ import { StaticCanvas } from 'fabric';
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
 import { ensureFonts, fontsInJSON, fontCssUrl, FONT_NAMES } from './fonts.js';
+import { buildCmykPdf } from './cmyk.js';
 
 /** Render one page (serialized JSON string) to an offscreen fabric canvas. */
 export async function renderPage(design, pageJSON, { transparent = false, forceBg = null, bleed = 0 } = {}) {
@@ -117,6 +118,7 @@ export async function exportDesign(design, opts) {
     return downloadBlob(blob, `${name}.pptx`);
   }
 
+  if (format === 'pdf' && opts.print && opts.cmyk) return exportCmykPDF(design, list, name, onProgress);
   if (format === 'pdf' && opts.print) return exportPrintPDF(design, list, name, onProgress);
 
   if (format === 'pdf') {
@@ -211,4 +213,22 @@ async function exportPrintPDF(design, list, name, onProgress) {
   }
   onProgress(list.length, list.length);
   return downloadBlob(pdf.output('blob'), `${name}-print.pdf`);
+}
+
+/** Print PDF in CMYK (300 dpi, 3 mm bleed, crop marks). */
+async function exportCmykPDF(design, list, name, onProgress) {
+  const pxPerMM = design.mm ? design.width / design.mm[0] : 96 / 25.4;
+  const tw = design.mm ? design.mm[0] : design.width / pxPerMM;
+  const th = design.mm ? design.mm[1] : design.height / pxPerMM;
+  const multiplier = Math.max(1, (300 / 25.4) / pxPerMM);
+  const pages = [];
+  for (let k = 0; k < list.length; k++) {
+    onProgress(k, list.length);
+    const sc = await renderPage(design, list[k].page.json, { forceBg: '#ffffff', bleed: Math.round(3 * pxPerMM) });
+    const canvas = sc.toCanvasElement(multiplier);
+    sc.dispose();
+    pages.push({ canvas, trimW: tw, trimH: th, bleed: 3, slug: 8 });
+  }
+  onProgress(list.length, list.length);
+  return downloadBlob(buildCmykPdf(pages, design.name), `${name}-print-cmyk.pdf`);
 }

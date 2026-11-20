@@ -848,31 +848,89 @@ features.addPageNumber = async function (fmt = 'n') {
   return t;
 };
 
+// ------------------------------------------------------------ outline & table of contents
+/** Headings on every page: big text = level 1 (≥ 8% of the short side) or level 2 (≥ 5.5%). */
+features.outline = function () {
+  const U = this.U;
+  return this.design.pages.map((p, i) => {
+    const objs = JSON.parse(p.json).objects || [];
+    const heads = [];
+    objs.forEach((o, idx) => {
+      if (!/text/i.test(o.type) || o.autoPage || o.autoToc || !String(o.text || '').trim()) return;
+      const size = (o.fontSize || 0) * (o.scaleY || 1);
+      const level = size >= U * 0.08 ? 1 : size >= U * 0.055 ? 2 : 0;
+      if (level) heads.push({ level, text: String(o.text).replace(/\s+/g, ' ').trim().slice(0, 80), idx, top: o.top });
+    });
+    heads.sort((a, b) => a.top - b.top);
+    return { page: i, title: p.title || '', hidden: !!p.hidden, heads };
+  });
+};
+
+features.tocText = function (selfPage) {
+  const lines = [];
+  for (const e of this.outline()) {
+    if (e.hidden || e.page === selfPage) continue;
+    const title = e.title || e.heads.find((h) => h.level === 1)?.text || e.heads[0]?.text || `หน้า ${e.page + 1}`;
+    lines.push(`${title}  ${'.'.repeat(Math.max(3, 40 - Math.min(36, title.length)))}  ${e.page + 1}`);
+  }
+  return lines.join('\n') || '(ยังไม่มีหัวข้อ: ตั้งชื่อหน้า หรือเพิ่มหัวข้อในหน้าอื่นก่อน)';
+};
+
+features.addTableOfContents = async function () {
+  const { Textbox } = await import('fabric');
+  await ensureFont('Sarabun');
+  const t = new Textbox(this.tocText(this.cur), {
+    fontFamily: 'Sarabun', fontSize: Math.round(this.U * 0.035), fill: '#1f2333', width: this.W * 0.75, lineHeight: 1.6,
+    autoToc: true, name: 'สารบัญ', editable: false,
+  });
+  this.addObject(t);
+  toast('สารบัญจะอัปเดตเองเมื่อชื่อหน้า หัวข้อ หรือลำดับหน้าเปลี่ยน');
+  return t;
+};
+
+features.renderOutline = function (body) {
+  const data = this.outline();
+  body.innerHTML = `<p class="hint">หัวข้อ = ข้อความขนาดใหญ่ในแต่ละหน้า คลิกเพื่อไปยังตำแหน่งนั้น ตั้งชื่อหน้าได้ที่ปุ่ม 💬 ด้านล่าง</p>
+    <button class="btn full" data-act="toc-add">☰ เพิ่มสารบัญอัตโนมัติในหน้านี้</button>
+    <div class="outline">${data.map((e) => `
+      <button class="ol-page ${e.page === this.cur ? 'on' : ''}" data-act="ol-go:${e.page}:-1"><b>${e.page + 1}</b> ${esc(e.title || e.heads[0]?.text || 'ไม่มีหัวข้อ')}${e.hidden ? ' <small>(ซ่อน)</small>' : ''}</button>
+      ${e.heads.map((h) => `<button class="ol-head l${h.level}" data-act="ol-go:${e.page}:${h.idx}">${esc(h.text)}</button>`).join('')}`).join('')}</div>`;
+};
+
+features.outlineGo = async function (page, idx) {
+  if (page !== this.cur) await this.gotoPage(page);
+  if (idx >= 0) {
+    const o = this.canvas.getObjects()[idx];
+    if (o) { this.canvas.setActiveObject(o); this.canvas.requestRenderAll(); }
+  }
+  if (this.panel === 'outline') this.renderPanel();
+};
+
 /** Keep every automatic page-number text in sync with its page position. */
 features.syncPageNumbers = function () {
   const n = this.design.pages.length;
+  let toc = false;
   this.design.pages.forEach((p, i) => {
-    if (!p.json.includes('"autoPage"')) return;
+    const hasToc = p.json.includes('"autoToc"');
+    if (!p.json.includes('"autoPage"') && !hasToc) return;
+    toc = toc || hasToc;
     const j = JSON.parse(p.json);
     let changed = false;
     for (const o of j.objects || []) {
-      if (o.autoPage) {
-        const want = pageNumText(o.autoPage, i, n);
-        if (o.text !== want) { o.text = want; changed = true; }
-      }
+      const want = o.autoPage ? pageNumText(o.autoPage, i, n) : o.autoToc ? this.tocText(i) : null;
+      if (want !== null && o.text !== want) { o.text = want; changed = true; }
     }
     if (changed) p.json = JSON.stringify(j);
   });
   if (this.canvas) {
     let live = false;
     for (const o of this.canvas.getObjects()) {
-      if (o.autoPage) {
-        const want = pageNumText(o.autoPage, this.cur, n);
-        if (o.text !== want) { o.set('text', want); o.initDimensions(); live = true; }
-      }
+      const want = o.autoPage ? pageNumText(o.autoPage, this.cur, n) : o.autoToc ? this.tocText(this.cur) : null;
+      if (want !== null && o.text !== want) { o.set('text', want); o.initDimensions(); live = true; }
     }
     if (live) this.canvas.requestRenderAll();
   }
+  this._hasToc = toc;
 };
 
 // ------------------------------------------------------------ find & replace (all pages)

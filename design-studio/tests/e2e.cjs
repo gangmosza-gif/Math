@@ -103,6 +103,7 @@ async function exportAs(fmt, opts = {}) {
   if (opts.scale) await page.selectOption('[data-scale]', String(opts.scale));
   if (opts.transparent) await page.check('[data-transparent]');
   if (opts.print) await page.check('[data-print]');
+  if (opts.cmyk) await page.check('[data-cmyk]');
   if (opts.pages) {
     await page.selectOption('[data-pages-sel]', opts.pages === 'cur' ? 'cur' : 'custom');
     if (opts.pages !== 'cur') await page.fill('[data-pages-custom]', opts.pages);
@@ -115,6 +116,24 @@ const isWEBP = (b) => b.slice(0, 4).toString() === 'RIFF' && b.slice(8, 12).toSt
 const isZIP = (b) => b[0] === 0x50 && b[1] === 0x4b;
 const pdfPages = (b) => (b.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
 const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
+const { execFileSync } = require('child_process');
+/** Render page 1 of a PDF with poppler to raw RGB (PPM) at the given dpi. */
+function pdfToRGB(buf, dpi = 20) {
+  const f = path.join(OUT, `r-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.pdf`);
+  fs.writeFileSync(f, buf);
+  execFileSync('pdftoppm', ['-r', String(dpi), '-f', '1', '-l', '1', f, f]);
+  const ppm = fs.readdirSync(OUT).filter((x) => x.startsWith(path.basename(f)) && x.endsWith('.ppm')).map((x) => path.join(OUT, x))[0];
+  const b = fs.readFileSync(ppm);
+  const head = b.toString('latin1', 0, 30).split(/\s+/);
+  const w = +head[1], h = +head[2];
+  return { w, h, data: b.subarray(b.length - w * h * 3) };
+}
+function meanDiff(a, b) {
+  if (a.w !== b.w || a.h !== b.h) return 255;
+  let s = 0;
+  for (let i = 0; i < a.data.length; i++) s += Math.abs(a.data[i] - b.data[i]);
+  return s / a.data.length;
+}
 
 // ---------------------------------------------------------------- main
 (async () => {
@@ -1420,6 +1439,52 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     await page.click('[data-act="undo"]');
     await wait(300);
   });
+  await step('[A5] แผงโครงร่าง (หัวข้อทุกหน้า คลิกไปตำแหน่ง) + สารบัญอัตโนมัติที่อัปเดตตามชื่อหน้า/หัวข้อ/ลำดับหน้า', async () => {
+    await ev(() => { delete __lai.design.pages[1].title; delete __lai.design.pages[2].title; __lai.pushHistory(); });
+    await page.click('.page-thumb[data-page="1"]');
+    await wait(200);
+    await panel('text');
+    await page.click('.text-add[data-act="text:heading"]');
+    await wait(300);
+    await ev(() => { const t = __lai.canvas.getActiveObject(); t.set('text', 'บทที่ 1 จำนวนนับ'); __lai.commit(); });
+    await page.click('.page-thumb[data-page="2"]');
+    await wait(200);
+    await page.click('[data-act="page-notes"]');
+    await page.fill('.modal [data-title]', 'แบบฝึกหัด');
+    await page.click('.modal [data-go]');
+    await page.click('.page-thumb[data-page="0"]');
+    await wait(200);
+    await page.click('[data-act="toc-add"]');
+    await wait(300);
+    const toc = () => ev(() => __lai.canvas.getObjects().find((o) => o.autoToc)?.text || '');
+    let t = await toc();
+    assert(/บทที่ 1 จำนวนนับ .*2/.test(t) && /แบบฝึกหัด .*3/.test(t), 'toc: ' + t);
+    // rename heading on page 2 → toc follows
+    await page.click('.page-thumb[data-page="1"]');
+    await wait(200);
+    await ev(() => { const o = __lai.canvas.getObjects().find((x) => x.text === 'บทที่ 1 จำนวนนับ'); o.set('text', 'บทที่ 1 การบวก'); __lai.commit(); });
+    await page.click('.page-thumb[data-page="0"]');
+    await wait(300);
+    t = await toc();
+    assert(t.includes('บทที่ 1 การบวก') && !t.includes('จำนวนนับ'), 'toc update: ' + t);
+    // move pages → numbers follow
+    await page.click('.page-thumb[data-page="2"]');
+    await wait(200);
+    await page.click('[data-act="page-left"]');
+    await wait(300);
+    const j = await ev(() => __lai.design.pages[0].json);
+    assert(/แบบฝึกหัด[^"]*2/.test(j) && /การบวก[^"]*3/.test(j), 'toc after move');
+    // outline panel
+    await panel('outline');
+    const heads = await page.$$eval('.ol-head', (e) => e.map((x) => x.textContent));
+    assert(heads.includes('บทที่ 1 การบวก'), 'outline: ' + heads);
+    await page.click('.ol-head:has-text("บทที่ 1 การบวก")');
+    await wait(300);
+    assert((await ev(() => [__lai.cur, __lai.canvas.getActiveObject()?.text].join())) === '2,บทที่ 1 การบวก', 'outline go');
+    for (let i = 0; i < 6; i++) { await page.click('[data-act="undo"]'); await wait(150); }
+    await page.click('.page-thumb[data-page="0"]');
+    await wait(300);
+  });
   await step('ปรับขนาดงาน: สำเร็จรูป และกำหนดเอง (ย่อ/ขยายเนื้อหา)', async () => {
     await ev(() => { const o = __lai.canvas.getObjects()[0]; o.set({ left: 540, top: 540, originX: 'center', originY: 'center' }); o.setCoords(); __lai.commit(); });
     await page.click('[data-act="resize"]');
@@ -1509,6 +1574,18 @@ const pngSize = (b) => [b.readUInt32BE(16), b.readUInt32BE(20)];
     const box = s.match(/\/MediaBox \[([\d. ]+)\]/)[1].split(' ').map(Number);
     // 1080px @96dpi = 285.75mm; + 2*(3+8)mm = 307.75mm = 872.4pt
     assert(b.slice(0, 4).toString() === '%PDF' && Math.abs(box[2] - 872.4) < 2, `mediabox ${box}`);
+  });
+  await step('[A6] PDF โรงพิมพ์โหมดสี CMYK: ไฟล์ถูกต้อง เป็น DeviceCMYK และสีตรงกับไฟล์ RGB', async () => {
+    const cmyk = await exportAs('pdf', { pages: 'cur', print: true, cmyk: true });
+    const txt = cmyk.toString('latin1');
+    assert(txt.startsWith('%PDF-1.4') && txt.includes('/DeviceCMYK') && txt.includes('/TrimBox') && txt.includes('%%EOF'), 'structure');
+    const f = path.join(OUT, 'cmyk-check.pdf');
+    fs.writeFileSync(f, cmyk);
+    const info = execFileSync('pdfinfo', [f]).toString();
+    assert(/Pages:\s+1/.test(info) && !/Syntax Error/i.test(info), info);
+    const rgb = await exportAs('pdf', { pages: 'cur', print: true });
+    const d = meanDiff(pdfToRGB(cmyk), pdfToRGB(rgb));
+    assert(d < 6, 'colour difference CMYK vs RGB = ' + d.toFixed(2));
   });
   await step('PowerPoint (.pptx) 3 สไลด์', async () => {
     const b = await exportAs('pptx');

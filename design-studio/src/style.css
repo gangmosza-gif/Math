@@ -480,3 +480,10 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 .chip small { color: var(--muted); }
 .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .chip.add { border-style: dashed; color: var(--muted); }
+.outline { display: flex; flex-direction: column; gap: 2px; }
+.ol-page { text-align: left; padding: 8px 10px; border-radius: 8px; font-weight: 600; font-size: 13px; display: flex; gap: 8px; align-items: baseline; }
+.ol-page b { color: var(--muted); font-size: 12px; min-width: 18px; }
+.ol-page.on { background: var(--accent-soft); color: var(--accent); }
+.ol-head { text-align: left; padding: 5px 10px 5px 36px; border-radius: 6px; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ol-head.l2 { padding-left: 52px; color: var(--muted); }
+.ol-page:hover, .ol-head:hover { background: var(--surface-2); }

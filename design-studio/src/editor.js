@@ -33,7 +33,7 @@ Object.assign(InteractiveFabricObject.ownDefaults, {
   padding: 2,
 });
 
-const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder', 'link', 'alt', 'autoPage', 'shapeText'];
+const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder', 'link', 'alt', 'autoPage', 'shapeText', 'autoToc'];
 export const BLANK_PAGE = (bg = '#ffffff') => JSON.stringify({ version: '6.9.1', objects: [], background: bg });
 
 const COLORS = [
@@ -129,7 +129,7 @@ export class Editor {
             ${[
               ['templates', 'template', 'เทมเพลต'], ['elements', 'elements', 'องค์ประกอบ'], ['text', 'text', 'ข้อความ'],
               ['uploads', 'upload', 'อัปโหลด'], ['photos', 'photo', 'รูปภาพ'], ['background', 'background', 'พื้นหลัง'],
-              ['draw', 'draw', 'วาด'], ['layers', 'layers', 'เลเยอร์'],
+              ['draw', 'draw', 'วาด'], ['layers', 'layers', 'เลเยอร์'], ['outline', 'list', 'โครงร่าง'],
             ].map(([k, ic, label]) => `<button class="rail-btn" data-panel="${k}">${icon(ic, 22)}<span>${label}</span></button>`).join('')}
           </nav>
           <aside class="panel" data-panel-box>
@@ -353,7 +353,7 @@ export class Editor {
     this.canvas.requestRenderAll();
     this.renderCtx();
     this.renderPages();
-    if (this.panel === 'layers' || this.panel === 'background') this.renderPanel();
+    if (this.panel === 'layers' || this.panel === 'background' || this.panel === 'outline') this.renderPanel();
     const pageId = this.design.pages[this.cur].id;
     ensureFonts(fontList).then(async () => {
       this.refreshTexts();
@@ -377,7 +377,10 @@ export class Editor {
   /** Persist current page into the design + history. `soft` = coalesce typing. */
   commit(soft = false) {
     if (this.loading) return;
-    if (!soft) for (const o of this.canvas.getObjects()) if (o.autoPage) { this.syncPageNumbers(); break; }
+    if (!soft && (this._hasToc || this.canvas.getObjects().some((o) => o.autoPage || o.autoToc))) {
+      this.design.pages[this.cur].json = this.serialize();
+      this.syncPageNumbers();
+    }
     this.design.pages[this.cur].json = this.serialize();
     if (soft) {
       clearTimeout(this._softT);
@@ -390,7 +393,7 @@ export class Editor {
     this.scheduleThumb();
     if (!soft) {
       this.renderCtx();
-      if (this.panel === 'layers') this.renderPanel();
+      if (this.panel === 'layers' || this.panel === 'outline') this.renderPanel();
     }
   }
 
@@ -1830,11 +1833,13 @@ export class Editor {
   }
 
   async renderPanel() {
-    const titles = { templates: 'เทมเพลต', elements: 'องค์ประกอบ', text: 'ข้อความ', uploads: 'อัปโหลด', photos: 'รูปภาพฟรี', background: 'พื้นหลัง', draw: 'วาดอิสระ', layers: 'เลเยอร์' };
+    const titles = { outline: 'โครงร่างเอกสาร', templates: 'เทมเพลต', elements: 'องค์ประกอบ', text: 'ข้อความ', uploads: 'อัปโหลด', photos: 'รูปภาพฟรี', background: 'พื้นหลัง', draw: 'วาดอิสระ', layers: 'เลเยอร์' };
     const body = this.$('[data-panel-body]');
     this.$('[data-panel-title]').textContent = titles[this.panel] || '';
     const p = this.panel;
-    if (p === 'templates') {
+    if (p === 'outline') {
+      this.renderOutline(body);
+    } else if (p === 'templates') {
       body.innerHTML = `<p class="hint">คลิกเทมเพลตเพื่อใช้กับหน้านี้ (ถ้าหน้ามีของอยู่แล้วจะเพิ่มเป็นหน้าใหม่) ทุกเทมเพลตปรับตามขนาดงานอัตโนมัติ</p>
         <div class="tpl-grid">${TEMPLATES.map((t, i) => `<button class="tpl" data-act="tpl:${i}" title="${esc(t.name)}"><div class="tpl-img" data-tpl-img="${i}" style="aspect-ratio:${this.W}/${this.H}"></div><span>${esc(t.name)}</span></button>`).join('')}</div>`;
       this.renderTemplateThumbs();
@@ -1876,6 +1881,7 @@ export class Editor {
         <button class="text-add body" data-act="text:body">เพิ่มเนื้อความ</button>
         <div class="sec-title">เลขหน้าอัตโนมัติ</div>
         <div class="grid2"><button class="btn sm" data-act="pagenum:n"># เลขหน้า</button><button class="btn sm" data-act="pagenum:nN"># หน้า / ทั้งหมด</button></div>
+        <button class="btn sm full" data-act="toc-add">☰ สารบัญอัตโนมัติ</button>
         <div class="sec-title">ชุดข้อความสำเร็จรูป</div>
         <div class="combo-grid">
           <button class="combo" data-act="combo:0"><b style="font-family:Kanit;font-weight:700;text-shadow:2px 3px 6px rgba(0,0,0,.3)">ลดราคา!</b></button>
@@ -2026,6 +2032,8 @@ export class Editor {
       case 'sticker': return this.addObject(Object.assign(makeSticker(STICKERS[+arg], this.U * 0.25), { name: 'สติกเกอร์' }));
       case 'text': return this.addText(arg);
       case 'pagenum': return this.addPageNumber(arg);
+      case 'toc-add': return this.addTableOfContents();
+      case 'ol-go': { const [pg, ix] = arg.split(':').map(Number); return this.outlineGo(pg, ix); }
       case 'combo': {
         const presets = [
           { text: 'ลดราคา!', fontFamily: 'Kanit', fontWeight: 'bold', fontSize: this.U * 0.12, fill: '#ff3131', shadowCfg: { color: 'rgba(0,0,0,0.3)', blur: 0.02, offsetX: 0.006, offsetY: 0.01 } },
@@ -2102,6 +2110,7 @@ export class Editor {
           <label data-opt="quality" hidden>คุณภาพ <input type="range" min="40" max="100" value="92" data-quality><output>92</output></label>
           <label data-opt="transparent" class="toggle-row"><input type="checkbox" data-transparent> พื้นหลังโปร่งใส</label>
           <label data-opt="print" class="toggle-row"><input type="checkbox" data-print> PDF สำหรับโรงพิมพ์ (300 dpi + ระยะตัดตก 3 มม. + เครื่องหมายตัด)</label>
+          <label data-opt="cmyk" class="toggle-row" hidden><input type="checkbox" data-cmyk> โหมดสี CMYK (สำหรับโรงพิมพ์ระบบออฟเซ็ต)</label>
           <label data-opt="pages">หน้า
             <select class="select" data-pages-sel>
               <option value="all">ทุกหน้า (${this.visiblePageIndexes().length} หน้า${n - this.visiblePageIndexes().length ? ` ไม่รวม ${n - this.visiblePageIndexes().length} หน้าที่ซ่อน` : ''})</option>
@@ -2121,6 +2130,7 @@ export class Editor {
       const print = f === 'pdf' && el.querySelector('[data-print]').checked;
       el.querySelector('[data-opt="scale"]').hidden = f === 'svg' || f === 'json' || print;
       el.querySelector('[data-opt="print"]').hidden = f !== 'pdf';
+      el.querySelector('[data-opt="cmyk"]').hidden = !print;
       el.querySelector('[data-opt="quality"]').hidden = !(f === 'jpg' || f === 'webp');
       el.querySelector('[data-opt="transparent"]').hidden = f !== 'png';
       el.querySelector('[data-opt="pages"]').hidden = f === 'json';
@@ -2163,6 +2173,7 @@ export class Editor {
           quality: +q.value / 100,
           transparent: el.querySelector('[data-transparent]').checked,
           print: el.querySelector('[data-print]').checked,
+          cmyk: el.querySelector('[data-cmyk]').checked,
           onProgress: (i, total) => { go.textContent = total > 1 ? `กำลังสร้าง ${Math.min(i + 1, total)}/${total}…` : 'กำลังสร้าง…'; },
         });
         m.close();
