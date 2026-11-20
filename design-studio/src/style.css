@@ -487,3 +487,7 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 .ol-head { text-align: left; padding: 5px 10px 5px 36px; border-radius: 6px; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ol-head.l2 { padding-left: 52px; color: var(--muted); }
 .ol-page:hover, .ol-head:hover { background: var(--surface-2); }
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+.chip-row .chip { height: 28px; padding: 0 10px; font-size: 12px; }
+.up-del.set-bg { font-size: 13px; }
+[data-photo-tabs] { margin-bottom: 8px; }

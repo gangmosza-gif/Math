@@ -2,9 +2,11 @@
 // sizes are fractions of the page's short side (u) so they fit any format.
 import { Rect, Circle, Textbox, Polygon, Line, Gradient } from 'fabric';
 
+import { GENERATED_TEMPLATES } from './templates2.js';
+
 export const TEMPLATES = [
   {
-    id: 'sale', name: 'โปรโมชันลดราคา', bg: ['#ff5e62', '#ff9966'],
+    id: 'sale', cat: 'โปรโมชัน', name: 'โปรโมชันลดราคา', bg: ['#ff5e62', '#ff9966'],
     items: [
       { t: 'circle', x: 0.85, y: 0.15, r: 0.28, fill: '#ffffff', opacity: 0.15 },
       { t: 'circle', x: 0.1, y: 0.9, r: 0.22, fill: '#ffffff', opacity: 0.12 },
@@ -16,7 +18,7 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'quote', name: 'คำคม', bg: '#f6f1e9',
+    id: 'quote', cat: 'คำคม', name: 'คำคม', bg: '#f6f1e9',
     items: [
       { t: 'text', x: 0.5, y: 0.25, w: 0.3, text: '“', size: 0.3, font: 'Playfair Display', color: '#d4a373' },
       { t: 'text', x: 0.5, y: 0.5, w: 0.8, text: 'ความสำเร็จไม่ใช่จุดหมาย\nแต่คือการเดินทาง', size: 0.065, font: 'Pridi', color: '#3d2c1e', lh: 1.4 },
@@ -25,7 +27,7 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'math', name: 'ใบงานคณิตศาสตร์', bg: '#ffffff',
+    id: 'math', cat: 'การศึกษา', name: 'ใบงานคณิตศาสตร์', bg: '#ffffff',
     items: [
       { t: 'rect', x: 0.5, y: 0.07, w: 1, h: 0.14, fill: ['#4f8cff', '#7c5cff'] },
       { t: 'text', x: 0.5, y: 0.07, w: 0.9, text: 'ใบงานคณิตศาสตร์ เรื่อง การบวกและการลบ', size: 0.05, font: 'Kanit', color: '#ffffff', bold: true },
@@ -44,7 +46,7 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'certificate', name: 'เกียรติบัตร', bg: '#fffdf6',
+    id: 'certificate', cat: 'การศึกษา', name: 'เกียรติบัตร', bg: '#fffdf6',
     items: [
       { t: 'rect', x: 0.5, y: 0.5, w: 0.94, h: 0.92, fill: 'transparent', stroke: '#c9a227', sw: 0.012 },
       { t: 'rect', x: 0.5, y: 0.5, w: 0.9, h: 0.86, fill: 'transparent', stroke: '#c9a227', sw: 0.003 },
@@ -59,7 +61,7 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'birthday', name: 'สุขสันต์วันเกิด', bg: ['#a18cd1', '#fbc2eb'],
+    id: 'birthday', cat: 'เฉลิมฉลอง', name: 'สุขสันต์วันเกิด', bg: ['#a18cd1', '#fbc2eb'],
     items: [
       { t: 'text', x: 0.5, y: 0.2, w: 0.6, text: '🎈🎂🎉', size: 0.12, font: 'sans-serif', color: '#000' },
       { t: 'text', x: 0.5, y: 0.42, w: 0.9, text: 'Happy Birthday', size: 0.13, font: 'Pacifico', color: '#ffffff', shadow: true },
@@ -68,7 +70,7 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'event', name: 'เชิญร่วมงาน', bg: '#0f172a',
+    id: 'event', cat: 'กิจกรรม', name: 'เชิญร่วมงาน', bg: '#0f172a',
     items: [
       { t: 'circle', x: 0.9, y: 0.1, r: 0.35, fill: ['#7c5cff', '#22d3ee'], opacity: 0.6 },
       { t: 'circle', x: 0.05, y: 0.95, r: 0.25, fill: ['#ff5fa2', '#7c5cff'], opacity: 0.5 },
@@ -81,7 +83,7 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'announce', name: 'ประกาศ', bg: '#fff8e1',
+    id: 'announce', cat: 'ประกาศ', name: 'ประกาศ', bg: '#fff8e1',
     items: [
       { t: 'rect', x: 0.5, y: 0.14, w: 1, h: 0.28, fill: '#ffc107' },
       { t: 'text', x: 0.5, y: 0.14, w: 0.9, text: '📣 ประกาศ', size: 0.12, font: 'Kanit', color: '#1f2333', bold: true },
@@ -91,7 +93,7 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'slide', name: 'สไลด์หน้าแรก', bg: '#ffffff',
+    id: 'slide', cat: 'นำเสนอ', name: 'สไลด์หน้าแรก', bg: '#ffffff',
     items: [
       { t: 'rect', x: 0.04, y: 0.5, w: 0.08, h: 1, fill: ['#7c5cff', '#ff5fa2'] },
       { t: 'text', x: 0.55, y: 0.4, w: 0.75, text: 'หัวข้อการนำเสนอ', size: 0.13, font: 'Kanit', color: '#1f2333', bold: true, align: 'left' },
@@ -101,7 +103,7 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'thanks', name: 'ขอบคุณ', bg: ['#d4fc79', '#96e6a1'],
+    id: 'thanks', cat: 'เฉลิมฉลอง', name: 'ขอบคุณ', bg: ['#d4fc79', '#96e6a1'],
     items: [
       { t: 'text', x: 0.5, y: 0.4, w: 0.9, text: 'Thank You', size: 0.17, font: 'Dancing Script', color: '#1d4d2b', bold: true },
       { t: 'text', x: 0.5, y: 0.58, w: 0.8, text: 'ขอบคุณที่อุดหนุนนะคะ 💚', size: 0.06, font: 'Itim', color: '#1d4d2b' },
@@ -109,7 +111,7 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'menu', name: 'เมนูร้านกาแฟ', bg: '#2b1d14',
+    id: 'menu', cat: 'ร้านอาหาร', name: 'เมนูร้านกาแฟ', bg: '#2b1d14',
     items: [
       { t: 'text', x: 0.5, y: 0.1, w: 0.8, text: 'COFFEE MENU', size: 0.09, font: 'Bebas Neue', color: '#f4e1c1' },
       { t: 'line', x: 0.5, y: 0.17, w: 0.5, stroke: '#c8a27a', sw: 0.004 },
@@ -127,7 +129,7 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'thumb', name: 'ปกวิดีโอ', bg: ['#141e30', '#243b55'],
+    id: 'thumb', cat: 'โซเชียล', name: 'ปกวิดีโอ', bg: ['#141e30', '#243b55'],
     items: [
       { t: 'rect', x: 0.72, y: 0.5, w: 0.5, h: 1.2, fill: '#ffd400', angle: 12 },
       { t: 'text', x: 0.38, y: 0.32, w: 0.7, text: 'สอนเทคนิค', size: 0.1, font: 'Kanit', color: '#ffffff', bold: true, align: 'left' },
@@ -137,14 +139,17 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'minimal', name: 'มินิมอล', bg: '#ffffff',
+    id: 'minimal', cat: 'คำคม', name: 'มินิมอล', bg: '#ffffff',
     items: [
       { t: 'rect', x: 0.5, y: 0.5, w: 0.86, h: 0.86, fill: 'transparent', stroke: '#1f2333', sw: 0.004 },
       { t: 'text', x: 0.5, y: 0.42, w: 0.7, text: 'LESS IS MORE', size: 0.08, font: 'Montserrat', color: '#1f2333', bold: true, spacing: 300 },
       { t: 'text', x: 0.5, y: 0.55, w: 0.7, text: 'เรียบง่าย แต่มีความหมาย', size: 0.04, font: 'Prompt', color: '#64748b' },
     ],
   },
+  ...GENERATED_TEMPLATES,
 ];
+
+export const TEMPLATE_CATEGORIES = ['ทั้งหมด', ...new Set(TEMPLATES.map((t) => t.cat))];
 
 function fillOf(v, angle = 135) {
   if (!Array.isArray(v)) return v;
@@ -189,6 +194,13 @@ export function buildTemplate(tpl, W, H) {
         name: 'ข้อความ',
       });
       if (it.shadow) o.set('shadow', { color: 'rgba(0,0,0,0.3)', blur: u * 0.02, offsetX: u * 0.006, offsetY: u * 0.008 });
+      // a word longer than the box (common in Thai, which has no spaces) widens a textbox: shrink to fit
+      const target = it.w * W;
+      if (o.width > target + 1) {
+        const k = target / o.width;
+        o.set({ fontSize: o.fontSize * k, width: target });
+        o.initDimensions();
+      }
     } else if (it.t === 'rect') {
       const w = it.w * W, h = it.h * H;
       o = new Rect({
@@ -202,8 +214,9 @@ export function buildTemplate(tpl, W, H) {
         ry: it.rx ? it.rx * u : 0,
         name: 'สี่เหลี่ยม',
       });
+      if (it.shadow) o.set('shadow', { color: 'rgba(0,0,0,0.12)', blur: u * 0.04, offsetX: 0, offsetY: u * 0.012 });
     } else if (it.t === 'circle') {
-      o = new Circle({ ...common, radius: it.r * u, fill: fillOf(it.fill), name: 'วงกลม' });
+      o = new Circle({ ...common, radius: it.r * u, fill: fillOf(it.fill), stroke: it.stroke || null, strokeWidth: it.sw ? it.sw * u : 0, name: 'วงกลม' });
     } else if (it.t === 'line') {
       const w = it.w * W;
       o = new Line([0, 0, w, 0], { ...common, stroke: it.stroke, strokeWidth: it.sw * u, strokeLineCap: 'round', name: 'เส้น' });

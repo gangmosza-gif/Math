@@ -190,9 +190,20 @@ function meanDiff(a, b) {
 
   // =============================================================== TEMPLATES
   group('2. เทมเพลต');
-  await step('แผงเทมเพลตแสดงภาพตัวอย่างครบ 12 แบบ', async () => {
+  await step('[D1] แผงเทมเพลต 90+ แบบ โหลดภาพตัวอย่างเฉพาะที่เห็น + ค้นหา + หมวดหมู่', async () => {
     await panel('templates');
-    await page.waitForFunction(() => [...document.querySelectorAll('[data-tpl-img]')].filter((e) => e.style.backgroundImage).length === 12, null, { timeout: 30000 });
+    const n = await page.$$eval('.tpl', (e) => e.length);
+    assert(n >= 90, 'templates ' + n);
+    await page.waitForFunction(() => document.querySelectorAll('[data-tpl-img][data-ready]').length >= 6, null, { timeout: 30000 });
+    await page.fill('[data-tpl-search]', 'ใบงาน');
+    let vis = await page.$$eval('.tpl', (e) => e.filter((x) => !x.hidden).map((x) => x.title));
+    assert(vis.length >= 1 && vis.every((t) => t.includes('ใบงาน')), 'search ' + vis);
+    await page.fill('[data-tpl-search]', '');
+    await page.click('[data-tpl-cats] [data-cat="อินโฟกราฟิก"]');
+    vis = await page.$$eval('.tpl', (e) => e.filter((x) => !x.hidden).map((x) => x.dataset.cat));
+    assert(vis.length === 20 && vis.every((c) => c === 'อินโฟกราฟิก'), 'category ' + vis.length);
+    await page.waitForFunction(() => [...document.querySelectorAll('.tpl:not([hidden]) [data-tpl-img]')].slice(0, 4).every((e) => e.dataset.ready), null, { timeout: 30000 });
+    await page.click('[data-tpl-cats] [data-cat="ทั้งหมด"]');
   });
   await step('ใช้เทมเพลตกับหน้าว่าง → ใส่ลงหน้าเดิม', async () => {
     await page.click('[data-act="tpl:0"]');
@@ -203,9 +214,37 @@ function meanDiff(a, b) {
     await page.click('[data-act="tpl:2"]');
     await page.waitForFunction(() => __lai.design.pages.length === 2);
   });
-  await step('ทุกเทมเพลตใช้ได้ไม่มี error (12 แบบ)', async () => {
-    for (let i = 0; i < 12; i++) { await page.click(`[data-act="tpl:${i}"]`); await wait(250); }
+  await step('[D1] ทุกเทมเพลตใช้ได้ และทุกชิ้นอยู่ในหน้า บน 3 ขนาด (จัตุรัส / 16:9 / A4)', async () => {
+    for (let i = 0; i < 12; i++) { await page.click(`[data-act="tpl:${i}"]`); await wait(150); }
     await page.waitForFunction(() => __lai.design.pages.length === 14, null, { timeout: 30000 });
+    const bad = [];
+    for (const [w, h] of [[1080, 1080], [1920, 1080], [1240, 1754]]) {
+      const r = await ev(async ([w, h]) => {
+        const L = __lai;
+        const keep = L.design.pages.map((p) => ({ ...p }));
+        const W0 = L.W, H0 = L.H;
+        L.design.width = w; L.design.height = h;
+        const out = [];
+        const n = document.querySelectorAll('.tpl').length;
+        for (let i = 0; i < n; i++) {
+          L.design.pages = [{ id: 't', json: JSON.stringify({ objects: [], background: '#fff' }) }];
+          await L.loadPage(0);
+          await L.applyTemplate(i);
+          for (const o of L.canvas.getObjects()) {
+            o.setCoords();
+            const b = o.getBoundingRect();
+            const isText = /text/i.test(o.type);
+            const tol = isText ? 0.01 : 0.6;
+            if (b.left < -w * tol || b.top < -h * tol || b.left + b.width > w * (1 + tol) || b.top + b.height > h * (1 + tol)) out.push(`#${i} ${o.type} ${isText ? JSON.stringify(o.text.slice(0, 20)) : ''}`);
+          }
+        }
+        L.design.pages = keep; L.design.width = W0; L.design.height = H0;
+        await L.loadPage(0, { fit: true });
+        return out;
+      }, [w, h]);
+      bad.push(...r.map((x) => `${w}x${h} ${x}`));
+    }
+    assert(!bad.length, 'ล้นหน้า: ' + bad.slice(0, 6).join(' | '));
   });
   await step('ลบหน้าที่เกินจนเหลือ 1 หน้า', async () => {
     for (let i = 0; i < 13; i++) { await page.click('[data-act="page-del"]'); await wait(120); }
@@ -841,9 +880,25 @@ function meanDiff(a, b) {
     assert(isPNG(png), 'export');
     await clearPage();
   });
-  await step('แผงรูปภาพฟรีแสดงรายการรูป', async () => {
+  await step('[D1] คลังรูปถ่าย ~990 รูป (แสดงทีละ 60 + แสดงเพิ่ม) และคลังลวดลาย 72 แบบ ใช้เป็นรูป/พื้นหลังได้', async () => {
     await panel('photos');
-    assert((await page.$$eval('[data-act^="photo:"]', (e) => e.length)) > 0, 'no photos listed');
+    const total = await page.textContent('[data-tab="photos"]');
+    assert(/\((9\d\d)\)/.test(total), total);
+    const n1 = await page.$$eval('[data-act^="photo:"]', (e) => e.length);
+    await page.click('[data-more-photos]');
+    const n2 = await page.$$eval('[data-act^="photo:"]', (e) => e.length);
+    assert(n1 >= 40 && n2 > n1, `${n1} -> ${n2}`);
+    await page.click('[data-tab="patterns"]');
+    assert((await page.$$eval('[data-act^="pattern:"]', (e) => e.length)) === 72, 'patterns');
+    const c0 = await objCount();
+    await page.click('[data-act="pattern:5"]');
+    await page.waitForFunction((c) => __lai.canvas.getObjects().length === c + 1, c0);
+    await page.click('[data-act="bgpattern:14"]', { force: true });
+    await page.waitForFunction(() => !!__lai.canvas.backgroundImage);
+    const png = await exportAs('png', { pages: 'cur' });
+    assert(isPNG(png), 'export with pattern');
+    await ev(() => { __lai.canvas.backgroundImage = null; __lai.commit(); });
+    await page.click('[data-tab="photos"]');
   });
 
   // =============================================================== BACKGROUND / DRAW

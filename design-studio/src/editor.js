@@ -6,11 +6,12 @@ import { icon, LIBRARY_ICONS } from './icons.js';
 import { esc, h, toast, modal, confirmDialog, popover, closePopover, currentPopoverId } from './ui.js';
 import { FONTS, ensureFont, ensureFonts, fontsInJSON, linkAllFonts } from './fonts.js';
 import { SHAPES, LINES, STICKERS, makeSticker, shapePreviewSVG } from './shapes.js';
-import { TEMPLATES, buildTemplate, templateFonts, pageGradient } from './templates.js';
+import { TEMPLATES, TEMPLATE_CATEGORIES, buildTemplate, templateFonts, pageGradient } from './templates.js';
 import { exportDesign, printDesign, pageThumb, renderPage, safeURL } from './export.js';
 export { safeURL };
 import { saveDesign, listUploads, saveUpload, deleteUpload, uid } from './storage.js';
 import { PRESETS } from './presets.js';
+import { PATTERNS, PHOTO_LIBRARY } from './patterns.js';
 import { Vignette, warmthMatrix, tintMatrix, duotoneMatrix, sharpen } from './filters.js';
 import { fileToDataURL } from './imageutil.js';
 import { features, SMART_LABEL } from './features.js';
@@ -47,7 +48,6 @@ const GRADS = [
   ['#a18cd1', '#fbc2eb'], ['#141e30', '#243b55'], ['#d4fc79', '#96e6a1'], ['#84fab0', '#8fd3f4'],
   ['#fa709a', '#fee140'], ['#30cfd0', '#330867'], ['#000000', '#434343'], ['#e0c3fc', '#8ec5fc'],
 ];
-const PHOTO_IDS = [10, 11, 13, 15, 16, 17, 18, 19, 20, 24, 25, 26, 28, 29, 37, 42, 48, 54, 57, 60, 63, 64, 65, 76, 82, 96, 101, 106, 110, 116, 119, 129, 139, 152, 164, 177, 180, 184, 193, 201, 225, 237, 250, 274, 292, 306, 312, 326, 365, 429, 431, 433, 452, 488, 493, 494, 500, 514];
 
 const isText = (o) => o && (o.type === 'textbox' || o.type === 'itext' || o.type === 'text');
 const isImage = (o) => o && o.type === 'image';
@@ -1841,7 +1841,25 @@ export class Editor {
       this.renderOutline(body);
     } else if (p === 'templates') {
       body.innerHTML = `<p class="hint">คลิกเทมเพลตเพื่อใช้กับหน้านี้ (ถ้าหน้ามีของอยู่แล้วจะเพิ่มเป็นหน้าใหม่) ทุกเทมเพลตปรับตามขนาดงานอัตโนมัติ</p>
-        <div class="tpl-grid">${TEMPLATES.map((t, i) => `<button class="tpl" data-act="tpl:${i}" title="${esc(t.name)}"><div class="tpl-img" data-tpl-img="${i}" style="aspect-ratio:${this.W}/${this.H}"></div><span>${esc(t.name)}</span></button>`).join('')}</div>`;
+        <input class="input full search" data-tpl-search placeholder="ค้นหาเทมเพลต เช่น ใบงาน, เมนู, ไทม์ไลน์ (${TEMPLATES.length} แบบ)" aria-label="ค้นหาเทมเพลต" />
+        <div class="chip-row" data-tpl-cats>${TEMPLATE_CATEGORIES.map((c, i) => `<button class="chip ${i === 0 ? 'on' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+        <div class="tpl-grid">${TEMPLATES.map((t, i) => `<button class="tpl" data-act="tpl:${i}" data-cat="${esc(t.cat || '')}" title="${esc(t.name)} · ${esc(t.cat || '')}"><div class="tpl-img" data-tpl-img="${i}" style="aspect-ratio:${this.W}/${this.H}"></div><span>${esc(t.name)}</span></button>`).join('')}</div>
+        <p class="empty" data-tpl-empty hidden>ไม่พบเทมเพลตที่ค้นหา</p>`;
+      let cat = 'ทั้งหมด';
+      const filter = () => {
+        const q = body.querySelector('[data-tpl-search]').value.trim().toLowerCase();
+        let n = 0;
+        body.querySelectorAll('.tpl').forEach((b) => { b.hidden = (cat !== 'ทั้งหมด' && b.dataset.cat !== cat) || (q && !b.title.toLowerCase().includes(q)); if (!b.hidden) n++; });
+        body.querySelector('[data-tpl-empty]').hidden = n > 0;
+      };
+      body.querySelector('[data-tpl-search]').addEventListener('input', filter);
+      body.querySelector('[data-tpl-cats]').addEventListener('click', (e) => {
+        const c = e.target.closest('[data-cat]');
+        if (!c) return;
+        cat = c.dataset.cat;
+        body.querySelectorAll('[data-tpl-cats] .chip').forEach((x) => x.classList.toggle('on', x === c));
+        filter();
+      });
       this.renderTemplateThumbs();
     } else if (p === 'elements') {
       body.innerHTML = `
@@ -1903,8 +1921,27 @@ export class Editor {
         <div class="up-grid">${ups.map((u) => `<div class="up"><button class="up-img" data-act="up-add:${u.id}"><img src="${u.url}" alt="" loading="lazy"></button><button class="up-del" data-act="up-del:${u.id}" title="ลบ">${icon('close', 14)}</button></div>`).join('') || '<p class="empty">ยังไม่มีรูปที่อัปโหลด</p>'}</div>`;
       this._uploads = ups;
     } else if (p === 'photos') {
-      body.innerHTML = `<p class="hint">รูปภาพฟรีจาก Lorem Picsum (ใช้งานได้ฟรี) คลิกเพื่อเพิ่มลงงาน</p>
-        <div class="photo-grid">${PHOTO_IDS.map((id) => `<button class="photo" data-act="photo:${id}"><img src="https://picsum.photos/id/${id}/240/180" alt="" loading="lazy" onerror="this.closest('.photo').remove()"></button>`).join('')}</div>`;
+      const tab = this._photoTab || 'photos';
+      body.innerHTML = `
+        <div class="seg sm" data-photo-tabs><button class="${tab === 'photos' ? 'on' : ''}" data-tab="photos">รูปถ่าย (${PHOTO_LIBRARY.length})</button><button class="${tab === 'patterns' ? 'on' : ''}" data-tab="patterns">ลวดลาย (${PATTERNS.length})</button></div>
+        ${tab === 'photos' ? `<p class="hint">รูปถ่ายฟรีจาก Lorem Picsum (ใช้งานได้ฟรี ต้องต่ออินเทอร์เน็ต) คลิกเพื่อเพิ่มลงงาน</p>
+          <div class="photo-grid" data-photo-grid></div><button class="btn full" data-more-photos>แสดงเพิ่ม</button>`
+        : `<p class="hint">ลวดลายเวกเตอร์ ใช้ได้แม้ไม่มีอินเทอร์เน็ต คลิกเพื่อเพิ่ม หรือกด ⤢ เพื่อตั้งเป็นพื้นหลัง</p>
+          <div class="photo-grid">${PATTERNS.map((pt, i) => `<div class="up"><button class="photo" data-act="pattern:${i}" title="${esc(pt.name)}"><img src="${pt.url}" alt="${esc(pt.name)}" loading="lazy"></button><button class="up-del set-bg" data-act="bgpattern:${i}" title="ตั้งเป็นพื้นหลัง">⤢</button></div>`).join('')}</div>`}`;
+      body.querySelector('[data-photo-tabs]').addEventListener('click', (e) => { const t = e.target.closest('[data-tab]'); if (t) { this._photoTab = t.dataset.tab; this.renderPanel(); } });
+      const grid = body.querySelector('[data-photo-grid]');
+      if (grid) {
+        let shown = 0;
+        const more = () => {
+          const next = PHOTO_LIBRARY.slice(shown, shown + 60);
+          grid.insertAdjacentHTML('beforeend', next.map((id) => `<button class="photo" data-act="photo:${id}" title="รูปที่ ${id}"><img src="https://picsum.photos/id/${id}/240/180" alt="" loading="lazy" onerror="this.closest('.photo').remove()"></button>`).join(''));
+          shown += next.length;
+          body.querySelector('[data-more-photos]').hidden = shown >= PHOTO_LIBRARY.length;
+          this.markDraggable(grid);
+        };
+        body.querySelector('[data-more-photos]').addEventListener('click', more);
+        more();
+      }
     } else if (p === 'background') {
       const bg = this.canvas.backgroundColor;
       body.innerHTML = `
@@ -1917,7 +1954,10 @@ export class Editor {
         <button class="btn full" data-act="bg-upload">${icon('upload', 18)} อัปโหลดภาพเป็นพื้นหลัง</button>
         ${this.canvas.backgroundImage ? `<button class="btn full" data-act="bg-remove-image">${icon('trash', 18)} ลบภาพพื้นหลัง</button>` : ''}
         <p class="hint">หรือเลือกรูปบนงานแล้วกด “เป็นพื้นหลัง” ในแถบเครื่องมือ</p>
-        <div class="photo-grid">${PHOTO_IDS.slice(0, 12).map((id) => `<button class="photo" data-act="bgphoto:${id}"><img src="https://picsum.photos/id/${id}/240/180" alt="" loading="lazy" onerror="this.closest('.photo').remove()"></button>`).join('')}</div>`;
+        <div class="sec-title">ลวดลายพื้นหลัง</div>
+        <div class="photo-grid">${PATTERNS.filter((_, i) => i % 3 === 0).map((pt) => `<button class="photo" data-act="bgpattern:${PATTERNS.indexOf(pt)}" title="${esc(pt.name)}"><img src="${pt.url}" alt="" loading="lazy"></button>`).join('')}</div>
+        <div class="sec-title">รูปถ่ายพื้นหลัง</div>
+        <div class="photo-grid">${PHOTO_LIBRARY.slice(0, 12).map((id) => `<button class="photo" data-act="bgphoto:${id}"><img src="https://picsum.photos/id/${id}/240/180" alt="" loading="lazy" onerror="this.closest('.photo').remove()"></button>`).join('')}</div>`;
       const pk = body.querySelector('[data-bg-picker]');
       pk.addEventListener('input', () => { this.canvas.backgroundColor = pk.value; this.canvas.backgroundImage = null; this.canvas.requestRenderAll(); });
       pk.addEventListener('change', () => this.setBackground(pk.value));
@@ -1953,28 +1993,49 @@ export class Editor {
     this.markDraggable(body);
   }
 
-  async renderTemplateThumbs() {
+  /** Thumbnails are rendered lazily, only for templates scrolled into view. */
+  renderTemplateThumbs() {
     const W = this.W, H = this.H;
     const key = `${W}x${H}`;
     this._tplCache = this._tplCache || {};
     const cache = (this._tplCache[key] = this._tplCache[key] || {});
-    for (let i = 0; i < TEMPLATES.length; i++) {
-      const box = this.$(`[data-tpl-img="${i}"]`);
-      if (!box) return;
-      if (!cache[i]) {
-        const t = TEMPLATES[i];
-        await ensureFonts(templateFonts(t));
-        const { objects, background } = buildTemplate(t, W, H);
-        const json = { version: '6.9.1', objects: objects.map((o) => o.toObject()), background: background.toObject ? background.toObject() : background };
-        try {
-          const sc = await renderPage(this.design, json);
-          cache[i] = sc.toDataURL({ format: 'jpeg', quality: 0.8, multiplier: 260 / W });
-          sc.dispose();
-        } catch (e) { console.error(e); continue; }
+    const queue = [];
+    let busy = false;
+    const pump = async () => {
+      if (busy) return;
+      busy = true;
+      while (queue.length) {
+        const i = queue.shift();
+        const el = this.$(`[data-tpl-img="${i}"]`);
+        if (!el) continue;
+        if (!cache[i]) {
+          const t = TEMPLATES[i];
+          await ensureFonts(templateFonts(t));
+          const { objects, background } = buildTemplate(t, W, H);
+          const json = { version: '6.9.1', objects: objects.map((o) => o.toObject()), background: background.toObject ? background.toObject() : background };
+          try {
+            const sc = await renderPage(this.design, json);
+            cache[i] = sc.toDataURL({ format: 'jpeg', quality: 0.8, multiplier: 260 / W });
+            sc.dispose();
+          } catch (e) { console.error(e); continue; }
+        }
+        el.style.backgroundImage = `url(${cache[i]})`;
+        el.dataset.ready = '1';
       }
-      const el = this.$(`[data-tpl-img="${i}"]`);
-      if (el) el.style.backgroundImage = `url(${cache[i]})`;
-    }
+      busy = false;
+    };
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (!en.isIntersecting) continue;
+        io.unobserve(en.target);
+        const i = +en.target.dataset.tplImg;
+        if (cache[i]) { en.target.style.backgroundImage = `url(${cache[i]})`; en.target.dataset.ready = '1'; } else queue.push(i);
+      }
+      pump();
+    }, { root: this.$('[data-panel-body]'), rootMargin: '300px' });
+    this.el.querySelectorAll('[data-tpl-img]').forEach((el) => io.observe(el));
+    this._tplObserver?.disconnect();
+    this._tplObserver = io;
   }
 
   async applyTemplate(i) {
@@ -2051,6 +2112,8 @@ export class Editor {
       case 'up-add': { const u = (this._uploads || []).find((x) => x.id === arg); return u && this.addImage(u.url, u.name || 'รูปภาพ'); }
       case 'up-del': return deleteUpload(arg).then(() => this.renderPanel());
       case 'photo': case 'bgphoto': return this.addPhoto(+arg, k === 'bgphoto');
+      case 'pattern': return this.addImage(PATTERNS[+arg].url, 'ลวดลาย ' + PATTERNS[+arg].name);
+      case 'bgpattern': return this.setBackgroundImage(PATTERNS[+arg].url);
       case 'bg': this.setBackground(arg); return this.renderPanel();
       case 'bggrad': this.setBackground(GRADS[+arg]); return this.renderPanel();
       case 'bg-upload': return this.$('[data-file-bg]').click();
