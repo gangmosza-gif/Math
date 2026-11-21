@@ -182,6 +182,43 @@ function meanDiff(a, b) {
     await page.click('[data-act="home"]');
     await page.waitForSelector('.design-card');
   });
+  await step('หน้าแรกแบบแอป: วงกลมเริ่มงาน ปุ่มลัด เทมเพลตแนะนำ หมวดเทมเพลต และปุ่ม +', async () => {
+    assert((await page.$$('.start[data-cat]')).length === 8, 'start circles');
+    assert((await page.$$('.shortcut[data-short]')).length === 8, 'shortcuts');
+    assert((await page.$$('.tpl-row [data-tpl]')).length >= 10, 'template picks');
+    assert((await page.$$('.tcat[data-tcat]')).length >= 10, 'template categories');
+    await page.waitForSelector('.tpl-row img.ready', { timeout: 20000 });
+    // category sheet: pick a size
+    await page.click('.start[data-cat="0"]');
+    await page.click('.modal .size-opt[data-size="1"]');
+    await page.waitForSelector('.canvas-container');
+    await wait(400);
+    assert((await ev(() => [__lai.W, __lai.H].join('x'))) === '1080x1920', 'story size');
+    await page.click('[data-act="home"]');
+    await page.waitForSelector('.start');
+    // shortcut: editor opens with the tool already added
+    await page.click('.shortcut[data-short="5"]');
+    await page.waitForSelector('.canvas-container');
+    await page.waitForFunction(() => __lai.canvas.getObjects().some((o) => o.smart && o.smart.type === 'qr'), null, { timeout: 15000 });
+    await page.click('[data-act="home"]');
+    await page.waitForSelector('.start');
+    // template browser: category + search, then a new design with the template
+    await page.click('.tcat[data-tcat="อินโฟกราฟิก"]');
+    await page.waitForSelector('.tb-grid [data-tpl]');
+    await page.fill('[data-tb-q]', 'ไทม์ไลน์');
+    const n = await page.$$eval('.tb-grid [data-tpl]', (e) => e.length);
+    assert(n >= 1 && n < 20, `search ${n}`);
+    await page.click('.tb-grid [data-tpl] >> nth=0');
+    await page.waitForSelector('.canvas-container');
+    await page.waitForFunction(() => __lai.canvas.getObjects().length > 3, null, { timeout: 15000 });
+    assert((await ev(() => __lai.H > __lai.W)), 'A4 for infographic');
+    await page.click('[data-act="home"]');
+    await page.waitForSelector('.start');
+    // the + button lists every size
+    await page.click('.fab');
+    assert((await page.$$('.modal .size-opt')).length === 15, 'create sheet');
+    await page.keyboard.press('Escape');
+  });
   await step('สร้างงานจากขนาด Instagram 1080×1080', async () => {
     await page.click('.preset[data-preset="0"]');
     await page.waitForSelector('.canvas-container');
