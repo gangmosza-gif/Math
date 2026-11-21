@@ -53,12 +53,13 @@ const ARCHETYPES = [
     T(t, 0.5, 0.85, 0.5, 'ผู้อำนวยการ', 0.035, { color: t.muted }),
   ] },
   { key: 'diagonal', name: 'แถบเฉียง', cat: 'โปรโมชัน', items: (t) => [
-    { t: 'rect', x: 0.75, y: 0.5, w: 0.6, h: 1.4, fill: t.pri, angle: 14 },
-    { t: 'rect', x: 0.95, y: 0.5, w: 0.1, h: 1.4, fill: t.acc, angle: 14 },
-    H(t, 0.32, 0.34, 0.6, 'FLASH\nSALE', 0.15, { color: t.pri, align: 'left', lh: 1 }),
-    T(t, 0.32, 0.6, 0.56, 'ลดสูงสุด 70% เฉพาะ 3 วันนี้', 0.045, { align: 'left', bold: true }),
-    T(t, 0.32, 0.72, 0.56, 'ช้อปเลยที่หน้าร้านและออนไลน์', 0.035, { align: 'left', color: t.muted }),
-    T(t, 0.78, 0.5, 0.3, '🛍️', 0.25, { font: 'sans-serif' }),
+    // text stays left of the stripe on every page shape (square, 16:9, A4): narrow boxes that wrap
+    { t: 'rect', x: 0.8, y: 0.5, w: 0.6, h: 1.4, fill: t.pri, angle: 14 },
+    { t: 'rect', x: 0.99, y: 0.5, w: 0.1, h: 1.4, fill: t.acc, angle: 14 },
+    H(t, 0.27, 0.32, 0.46, 'FLASH\nSALE', 0.15, { color: t.pri, align: 'left', lh: 1 }),
+    T(t, 0.22, 0.58, 0.36, 'ลดสูงสุด 70% เฉพาะ 3 วันนี้', 0.045, { align: 'left', bold: true }),
+    T(t, 0.22, 0.73, 0.36, 'ช้อปเลยที่หน้าร้านและออนไลน์', 0.035, { align: 'left', color: t.muted }),
+    T(t, 0.8, 0.5, 0.3, '🛍️', 0.25, { font: 'sans-serif' }),
   ] },
   { key: 'bignum', name: 'ตัวเลขเด่น', cat: 'อินโฟกราฟิก', items: (t) => [
     T(t, 0.5, 0.18, 0.8, 'ผลสำรวจความพึงพอใจ', 0.045, { color: t.muted }),

@@ -319,6 +319,52 @@ function meanDiff(a, b) {
     }
     assert(!bad.length, 'ล้นหน้า: ' + bad.slice(0, 6).join(' | '));
   });
+  await step('ทุกเทมเพลต 3 ขนาด: ข้อความไม่วิ่งทับแถบเฉียง/สติกเกอร์อีโมจิใหญ่ ไม่ซ้อนกัน และใช้แต่ฟอนต์ที่มีในโปรแกรม', async () => {
+    const FONTS = [...fs.readFileSync(path.join(__dirname, '../src/fonts.js'), 'utf8').matchAll(/\['([^']+)',/g)].map((m) => m[1]).concat('sans-serif');
+    const bad = await ev(async (FONTS) => {
+      const L = __lai, fonts = new Set(FONTS), out = [];
+      const keep = L.design.pages.map((p) => ({ ...p })), W0 = L.design.width, H0 = L.design.height;
+      const n = document.querySelectorAll('.tpl').length;
+      for (const [w, h] of [[1080, 1080], [1920, 1080], [1240, 1754]]) {
+        L.design.width = w; L.design.height = h;
+        for (let i = 0; i < n; i++) {
+          L.design.pages = [{ id: 't', json: JSON.stringify({ objects: [], background: '#fff' }) }];
+          await L.loadPage(0);
+          await L.applyTemplate(i);
+          const objs = L.canvas.getObjects();
+          const texts = objs.filter((o) => /text/i.test(o.type) && o.visible);
+          const blockers = objs.filter((o) => (o.type === 'rect' && o.angle % 360 && o.fill && o.opacity > 0.5) || (/text/i.test(o.type) && /\p{Extended_Pictographic}/u.test(o.text) && o.fontSize > 0.15 * Math.min(w, h)));
+          for (const t of texts) {
+            if (!fonts.has(t.fontFamily)) out.push(`#${i} font ${t.fontFamily}`);
+            if (blockers.includes(t)) continue;
+            const m = t.calcTransformMatrix();
+            let y = -t.height / 2, hit = false;
+            t._textLines.forEach((_, li) => {
+              const lh = t.getHeightOfLine(li), lw = t.getLineWidth(li), off = t._getLineLeftOffset(li);
+              for (let fx = 0.05; fx <= 0.95; fx += 0.1) for (const fy of [0.35, 0.65]) {
+                const lx = -t.width / 2 + off + lw * fx, ly = y + lh * fy;
+                const P = { x: m[0] * lx + m[2] * ly + m[4], y: m[1] * lx + m[3] * ly + m[5] };
+                if (blockers.some((b) => b.containsPoint(P))) hit = true;
+              }
+              y += lh;
+            });
+            if (hit) out.push(`${w}x${h} #${i} "${t.text.slice(0, 16)}" ทับแถบ/อีโมจิ`);
+          }
+          for (let a = 0; a < texts.length; a++) for (let c = a + 1; c < texts.length; c++) {
+            const A = texts[a].getBoundingRect(), B = texts[c].getBoundingRect();
+            const ix = Math.max(0, Math.min(A.left + A.width, B.left + B.width) - Math.max(A.left, B.left));
+            const iy = Math.max(0, Math.min(A.top + A.height, B.top + B.height) - Math.max(A.top, B.top));
+            const small = Math.min(A.width * A.height, B.width * B.height);
+            if (small > 0 && (ix * iy) / small > 0.3 && !blockers.includes(texts[a]) && !blockers.includes(texts[c])) out.push(`${w}x${h} #${i} ข้อความซ้อนกัน`);
+          }
+        }
+      }
+      L.design.pages = keep; L.design.width = W0; L.design.height = H0;
+      await L.loadPage(0, { fit: true });
+      return [...new Set(out)];
+    }, FONTS);
+    assert(!bad.length, bad.slice(0, 6).join(' | '));
+  });
   await step('ลบหน้าที่เกินจนเหลือ 1 หน้า', async () => {
     for (let i = 0; i < 13; i++) { await page.click('[data-act="page-del"]'); await wait(120); }
     assert((await ev(() => __lai.design.pages.length)) === 1, 'pages not deleted');

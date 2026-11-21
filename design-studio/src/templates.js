@@ -131,11 +131,12 @@ export const TEMPLATES = [
   {
     id: 'thumb', cat: 'โซเชียล', name: 'ปกวิดีโอ', bg: ['#141e30', '#243b55'],
     items: [
-      { t: 'rect', x: 0.72, y: 0.5, w: 0.5, h: 1.2, fill: '#ffd400', angle: 12 },
-      { t: 'text', x: 0.38, y: 0.32, w: 0.7, text: 'สอนเทคนิค', size: 0.1, font: 'Kanit', color: '#ffffff', bold: true, align: 'left' },
-      { t: 'text', x: 0.38, y: 0.5, w: 0.7, text: 'คิดเลขเร็ว', size: 0.17, font: 'Kanit', color: '#ffd400', bold: true, align: 'left', shadow: true },
-      { t: 'text', x: 0.38, y: 0.7, w: 0.7, text: 'ใน 5 นาที!', size: 0.1, font: 'Kanit', color: '#ffffff', bold: true, align: 'left' },
-      { t: 'text', x: 0.78, y: 0.5, w: 0.3, text: '🧮', size: 0.3, font: 'sans-serif', color: '#000' },
+      // text keeps clear of the yellow stripe on every page shape (it shrinks to fit its column)
+      { t: 'rect', x: 0.8, y: 0.5, w: 0.5, h: 1.2, fill: '#ffd400', angle: 12 },
+      { t: 'text', x: 0.25, y: 0.32, w: 0.42, text: 'สอนเทคนิค', size: 0.1, font: 'Kanit', color: '#ffffff', bold: true, align: 'left' },
+      { t: 'text', x: 0.25, y: 0.5, w: 0.42, text: 'คิดเลขเร็ว', size: 0.17, font: 'Kanit', color: '#ffd400', bold: true, align: 'left', shadow: true },
+      { t: 'text', x: 0.25, y: 0.68, w: 0.42, text: 'ใน 5 นาที!', size: 0.1, font: 'Kanit', color: '#ffffff', bold: true, align: 'left' },
+      { t: 'text', x: 0.8, y: 0.5, w: 0.3, text: '🧮', size: 0.3, font: 'sans-serif', color: '#000' },
     ],
   },
   {
