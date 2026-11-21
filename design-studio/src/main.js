@@ -1,4 +1,5 @@
 import './style.css';
+import './thaiwrap.js'; // Thai word wrapping for every textbox (must load before any text is built)
 import { Editor, BLANK_PAGE } from './editor.js';
 import { PRESETS } from './presets.js';
 import { listDesigns, getDesign, saveDesign, deleteDesign, deleteVersionsOf, uid } from './storage.js';

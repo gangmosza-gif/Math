@@ -195,11 +195,22 @@ export function buildTemplate(tpl, W, H) {
         name: 'ข้อความ',
       });
       if (it.shadow) o.set('shadow', { color: 'rgba(0,0,0,0.3)', blur: u * 0.02, offsetX: u * 0.006, offsetY: u * 0.008 });
-      // a word longer than the box (common in Thai, which has no spaces) widens a textbox: shrink to fit
+      // the template's designed lines break only at spaces; a word longer than the box (common in Thai,
+      // which has no spaces) widens the box in that layout: shrink to fit
+      o.set('splitByGrapheme', false);
+      o.initDimensions();
       const target = it.w * W;
       if (o.width > target + 1) {
         const k = target / o.width;
         o.set({ fontSize: o.fontSize * k, width: target });
+        o.initDimensions();
+      }
+      // Thai word wrapping must not add lines the design did not have (a heading stays one line)
+      const designed = o._textLines.length;
+      o.set('splitByGrapheme', true);
+      o.initDimensions();
+      for (let k = 0; k < 16 && o._textLines.length > designed; k++) {
+        o.set('fontSize', o.fontSize * 0.96);
         o.initDimensions();
       }
     } else if (it.t === 'rect') {

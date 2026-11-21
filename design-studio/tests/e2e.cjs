@@ -376,8 +376,33 @@ function meanDiff(a, b) {
   await step('เพิ่มหัวข้อ / หัวข้อย่อย / เนื้อความ', async () => {
     await panel('text');
     for (const k of ['heading', 'sub', 'body']) await page.click(`.text-add[data-act="text:${k}"]`);
-    await wait(300);
+    // the first texts wait for their web fonts (slow on a cold start)
+    await page.waitForFunction(() => __lai.canvas.getObjects().length === 3, null, { timeout: 10000 }).catch(() => {});
     assert((await objCount()) === 3, 'expected 3 texts');
+    const kinds = await ev(() => __lai.canvas.getObjects().map((o) => o.fontSize));
+    assert(kinds[0] > kinds[1] && kinds[1] > kinds[2], 'heading > subheading > body ' + kinds);
+  });
+  await step('ข้อความไทยไม่เว้นวรรคตัดบรรทัดตามคำ (ไม่ยืดกล่องเกินหน้า ไม่แยกสระ/วรรณยุกต์) และงานเก่าที่บันทึกไว้ก็ตัดคำด้วย', async () => {
+    const r = await ev(async () => {
+      const L = __lai;
+      const keep = L.serialize();
+      L.canvas.remove(...L.canvas.getObjects());
+      await L.addText('body');
+      const t = L.canvas.getActiveObject();
+      const s = 'ภาษาไทยเขียนติดกันโดยไม่เว้นวรรคระหว่างคำ ซึ่งทำให้ข้อความยาวมาก (ทดสอบ) การตัดคำ, Hello world ราคา 1,250 บาท!';
+      t.set({ text: s, width: 500, fontSize: 40 }); t.initDimensions();
+      const lines = t._textLines.map((l) => l.join(''));
+      const json = t.toObject(); json.splitByGrapheme = false;
+      await L.canvas.loadFromJSON({ objects: [json], background: '#fff' });
+      const t2 = L.canvas.getObjects()[0];
+      const r = { w: Math.round(t.width), n: lines.length, joined: lines.join('') === s, bad: lines.filter((l) => /^[ัิ-ฺ็-๎,!)]/.test(l)), loaded: t2._textLines.length > 1 && Math.round(t2.width) === 500 };
+      await L.canvas.loadFromJSON(JSON.parse(keep));
+      L.canvas.requestRenderAll();
+      return r;
+    });
+    assert(r.w === 500 && r.n >= 4 && r.joined, 'wrap ' + JSON.stringify(r));
+    assert(!r.bad.length, 'line starts with a mark/punctuation ' + r.bad);
+    assert(r.loaded, 'old saved text wraps after loading');
   });
   await step('ชุดข้อความสำเร็จรูปทั้ง 8 แบบ', async () => {
     for (let i = 0; i < 8; i++) { await page.click(`[data-act="combo:${i}"]`); await wait(120); }
