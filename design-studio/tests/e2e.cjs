@@ -2729,6 +2729,37 @@ function meanDiff(a, b) {
     assert(bg === 'rgb(20, 21, 27)', bg);
     await d.close();
   });
+  await step('มือถือ: กดค้างที่วัตถุเปิดเมนู (คัดลอก/ทำสำเนา/ลำดับชั้น) ใช้งานได้ · แตะสั้นไม่เปิดเมนู · ลากนิ้วยังย้ายวัตถุได้', async () => {
+    const pctx = await browser.newContext({ ...devices['iPhone 13'] });
+    const mp = await pctx.newPage();
+    try {
+      await mp.goto(URL); await mp.waitForSelector('.preset[data-preset="0"]');
+      await mp.click('.preset[data-preset="0"]'); await mp.waitForFunction(() => window.__lai && __lai.canvas); await mp.waitForTimeout(500);
+      await mp.evaluate(() => __lai.addShape(0)); await mp.waitForTimeout(300);
+      const pt = () => mp.evaluate(() => { const c = __lai.canvas, o = c.getObjects()[0], p = o.getCenterPoint(), v = c.viewportTransform, r = c.upperCanvasEl.getBoundingClientRect(); return { x: r.left + p.x * v[0] + v[4], y: r.top + p.y * v[3] + v[5] }; });
+      const cdp = await pctx.newCDPSession(mp);
+      const touch = async (p, hold, move) => {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: p.x, y: p.y }] });
+        if (move) for (let i = 1; i <= 8; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p.x + i * 8, y: p.y + i * 4 }] });
+        await mp.waitForTimeout(hold);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await mp.waitForTimeout(250);
+      };
+      const menu = () => mp.evaluate(() => !!document.querySelector('.popover .menu [data-m]'));
+      await touch(await pt(), 120, false);
+      assert(!(await menu()), 'short tap opened the menu');
+      await touch(await pt(), 800, false);
+      assert(await menu(), 'long press opened no menu');
+      await mp.click('.popover .menu [data-m="duplicate"]');
+      await mp.waitForTimeout(300);
+      assert((await mp.evaluate(() => __lai.canvas.getObjects().length)) === 2, 'duplicate from the touch menu');
+      const before = await mp.evaluate(() => __lai.canvas.getObjects().map((o) => Math.round(o.left)).join());
+      await touch(await pt(), 100, true);
+      assert(!(await menu()), 'dragging opened the menu');
+      const after = await mp.evaluate(() => __lai.canvas.getObjects().map((o) => Math.round(o.left)).join());
+      assert(after !== before, 'finger drag moves the object');
+    } finally { await pctx.close(); }
+  });
 
   await step('[F1] ฟอนต์โหลดช้า: ตารางจัดเรียงใหม่อัตโนมัติเมื่อฟอนต์มาถึง และไม่เพิ่มขั้นเลิกทำ', async () => {
     const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true });

@@ -302,6 +302,33 @@ export class Editor {
     c.on('mouse:down', (e) => {
       if (e.e.button === 2) this.showContextMenu(e);
     });
+    // touch: press and hold (without moving) opens the same menu as a right click
+    const up = c.upperCanvasEl;
+    let lp = null;
+    const cancelLP = () => { if (lp) { clearTimeout(lp.timer); lp = null; } };
+    up.addEventListener('touchstart', (e) => {
+      cancelLP();
+      if (e.touches.length !== 1 || c.isDrawingMode) return;
+      const t0 = e.touches[0];
+      lp = { x: t0.clientX, y: t0.clientY, fired: false };
+      lp.timer = setTimeout(() => {
+        if (!lp) return;
+        lp.fired = true;
+        const fake = new MouseEvent('mousedown', { clientX: lp.x, clientY: lp.y });
+        let target = null;
+        try { target = c.findTarget(fake); } catch { /* no target */ }
+        if (target && target.cropUI) return;
+        if (navigator.vibrate) try { navigator.vibrate(15); } catch { /* not allowed */ }
+        this.showContextMenu({ target, e: { clientX: lp.x, clientY: lp.y } });
+      }, 550);
+    }, { passive: true });
+    up.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (lp && t && Math.hypot(t.clientX - lp.x, t.clientY - lp.y) > 10) cancelLP(); }, { passive: true });
+    up.addEventListener('touchend', (e) => {
+      // the menu is open: swallow the release so it is not taken as a tap that closes it
+      if (lp && lp.fired) e.preventDefault();
+      cancelLP();
+    }, { passive: false });
+    up.addEventListener('touchcancel', cancelLP, { passive: true });
     c.on('mouse:dblclick', (e) => {
       const t = e.target;
       if (t && t.cropUI) return this.endCrop(true);
