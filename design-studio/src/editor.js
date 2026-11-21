@@ -12,7 +12,7 @@ export { safeURL };
 import { saveDesign, listUploads, saveUpload, deleteUpload, uid } from './storage.js';
 import { PRESETS } from './presets.js';
 import { PATTERNS, PHOTO_LIBRARY } from './patterns.js';
-import { loadGraphics, loadIllustrations, setIllustrations, elementsHomeHTML, elementsViewHTML, elementsSearchHTML, makeElement, recolorGraphic } from './elements.js';
+import { loadGraphics, loadIllustrations, setIllustrations, elementsHomeHTML, elementsViewHTML, elementsSearchHTML, searchMatch, makeElement, recolorGraphic } from './elements.js';
 import { docSettings, hasDoc, docDecorations, decorationObjects, decorationFonts, visibleNumber, PAGE_NUM_FORMATS, WATERMARK_PRESETS, BORDER_STYLES } from './docsetup.js';
 import { Vignette, warmthMatrix, tintMatrix, duotoneMatrix, sharpen } from './filters.js';
 import { fileToDataURL } from './imageutil.js';
@@ -2584,8 +2584,12 @@ export class Editor {
         body.querySelector('[data-el-results-box]').innerHTML = (fr.length ? `<div class="el-row-head"><b>กรอบรูป</b><small class="hint">${fr.length}</small></div><div class="el-grid frames">${fr.map(([f, i]) => this.frameTile(f, i)).join('')}</div>` : '') + (v ? elementsSearchHTML(this._gfx, v) : '');
         body.querySelector('[data-el-home]').hidden = !!v;
         this.markDraggable(body);
-        body.querySelectorAll('.el, .smart-btn').forEach((b) => { b.hidden = !!v && !(b.title || '').toLowerCase().includes(v); });
+        // filter the panel's own tiles by title; the search results were already matched
+        body.querySelectorAll('.el, .smart-btn').forEach((b) => { if (!b.closest('[data-el-results-box]')) b.hidden = !!v && !searchMatch(b.title || '', v); });
         body.querySelectorAll('.sec-title, .chart-group').forEach((t) => { const g = t.nextElementSibling; const items = g ? [...g.querySelectorAll('.el, .smart-btn')] : []; t.hidden = items.length > 0 && items.every((c) => c.hidden); });
+        // nothing anywhere: say so (with ideas) instead of an empty panel
+        const any = [...body.querySelectorAll('.el, .smart-btn, .col-card')].some((x) => !x.hidden && !x.closest('[hidden]'));
+        if (v && !any) body.querySelector('[data-el-results-box]').innerHTML = `<div class="empty-search"><b>ไม่พบองค์ประกอบ “${esc(q.value.trim())}”</b><p class="hint">ลองคำอื่น เช่น ดาว หัวใจ ดอกไม้ ลูกศร สัตว์ กรอบ กราฟ หรือพิมพ์คำภาษาไทยที่สั้นลง</p></div>`;
       };
       q.addEventListener('input', runSearch);
       if (q.value) runSearch();

@@ -601,21 +601,37 @@ function meanDiff(a, b) {
   group('5. องค์ประกอบ');
   await step('รูปทรงทั้ง 24 แบบ', async () => {
     await clearPage();
+    await panel('elements');
     for (let i = 0; i < 24; i++) await page.click(`[data-act="shape:${i}"]`);
     assert((await objCount()) === 24, `count ${await objCount()}`);
   });
   await step('เส้นทั้ง 7 แบบ และสติกเกอร์ 48 แบบ', async () => {
     await clearPage();
+    await panel('elements');
     for (let i = 0; i < 7; i++) await page.click(`[data-act="line:${i}"]`);
     const n = await page.$$eval('[data-act^="sticker:"]', (e) => e.length);
     for (let i = 0; i < n; i++) await page.click(`[data-act="sticker:${i}"]`);
     assert(n === 48 && (await objCount()) === 55, `stickers ${n} count ${await objCount()}`);
   });
   await step('ค้นหาองค์ประกอบ ("ดาว") กรองผลถูกต้อง', async () => {
+    await panel('elements');
     await page.fill('[data-el-search]', 'ดาว');
     const vis = await page.$$eval('.el, .smart-btn', (b) => b.filter((x) => !x.hidden && !x.closest('[hidden]')).map((x) => x.title));
     assert(vis.length >= 2 && vis.every((t) => t.includes('ดาว')), vis.join());
     await page.fill('[data-el-search]', '');
+  });
+  await step('ค้นหาองค์ประกอบด้วยคำภาษาอังกฤษได้ผลเหมือนภาษาไทย และค้นไม่เจอมีข้อความบอก', async () => {
+    await panel('elements');
+    await page.waitForFunction(() => __lai._gfx, null, { timeout: 30000 });
+    const vis = () => page.$$eval('[data-panel-body] .el, [data-panel-body] .smart-btn', (b) => b.filter((x) => !x.hidden && !x.closest('[hidden]')).length);
+    await page.fill('[data-el-search]', 'flower'); await wait(300);
+    const en = await vis();
+    await page.fill('[data-el-search]', 'ดอกไม้'); await wait(300);
+    const th = await vis();
+    assert(en >= 20 && en >= th * 0.5, `flower ${en} vs ดอกไม้ ${th}`);
+    await page.fill('[data-el-search]', 'xyzqq'); await wait(300);
+    assert((await vis()) === 0 && /ไม่พบองค์ประกอบ/.test(await page.textContent('[data-el-results-box]')), 'not-found message');
+    await page.fill('[data-el-search]', ''); await wait(200);
   });
   await step('คลังองค์ประกอบ: รูปทรง 9 ตระกูล กราฟิก 18 คอลเลกชัน สติกเกอร์ 3 มิติ ไอคอนเปลี่ยนสีได้ โลโก้ ค้นหาภาษาไทย ใช้ล่าสุด', async () => {
     await clearPage();
@@ -757,6 +773,8 @@ function meanDiff(a, b) {
   group('6. ตาราง กราฟ QR สมการ');
   await step('เพิ่มตาราง แล้วแก้ไข: เพิ่มแถว/คอลัมน์ แก้ช่อง เปลี่ยนสี', async () => {
     await clearPage();
+    await panel('elements');
+    await ev(() => { __lai._elView = ''; __lai.renderPanel(); });
     await page.click('[data-act="smart:table"]');
     await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.type === 'table');
     await page.click('[data-act="smart-edit"]');

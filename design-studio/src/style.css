@@ -668,3 +668,4 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .smart-btn.prev .thumb { background: #f7f6fb; } }
 :root[data-theme="dark"] .smart-btn.prev .thumb { background: #f7f6fb; }
 .color-pop [data-hex].bad { border-color: #e5484d; box-shadow: 0 0 0 2px rgba(229,72,77,.2); }
+.empty-search { padding: 18px 8px; text-align: center; } .empty-search b { display: block; margin-bottom: 6px; }

@@ -106,9 +106,28 @@ export function elementsViewHTML(gfx, view) {
 }
 
 /** Search across shapes and graphics (English names + Thai keywords + collection titles). */
-export function elementsSearchHTML(gfx, q) {
+/** English search words → the Thai words the library is labelled with (each term matches either). */
+const EN_TH = {
+  star: 'ดาว', heart: 'หัวใจ', flower: 'ดอกไม้', flowers: 'ดอกไม้', leaf: 'ใบไม้', leaves: 'ใบไม้', tree: 'ต้นไม้', plant: 'ต้นไม้',
+  arrow: 'ลูกศร', arrows: 'ลูกศร', cat: 'แมว', dog: 'สุนัข', bird: 'นก', fish: 'ปลา', animal: 'สัตว์', animals: 'สัตว์',
+  food: 'อาหาร', fruit: 'ผลไม้', drink: 'เครื่องดื่ม', coffee: 'กาแฟ', cake: 'เค้ก', sun: 'ดวงอาทิตย์', moon: 'ดวงจันทร์',
+  cloud: 'เมฆ', rain: 'ฝน', snow: 'หิมะ', sky: 'ฟ้า', sea: 'ทะเล', water: 'น้ำ', fire: 'ไฟ', school: 'โรงเรียน',
+  book: 'หนังสือ', pencil: 'ดินสอ', student: 'นักเรียน', teacher: 'ครู', math: 'คณิต', science: 'วิทยาศาสตร์',
+  circle: 'วงกลม', square: 'สี่เหลี่ยม', triangle: 'สามเหลี่ยม', shape: 'รูปทรง', shapes: 'รูปทรง', line: 'เส้น', lines: 'เส้น',
+  frame: 'กรอบ', frames: 'กรอบ', border: 'กรอบ', chart: 'กราฟ', graph: 'กราฟ', table: 'ตาราง', icon: 'ไอคอน', icons: 'ไอคอน',
+  sticker: 'สติกเกอร์', badge: 'ป้าย', label: 'ป้าย', banner: 'ป้าย', ribbon: 'ริบบิ้น', gift: 'ของขวัญ', party: 'ปาร์ตี้',
+  birthday: 'วันเกิด', christmas: 'คริสต์มาส', music: 'ดนตรี', sport: 'กีฬา', ball: 'ลูกบอล', car: 'รถ', house: 'บ้าน', home: 'บ้าน',
+  money: 'เงิน', business: 'ธุรกิจ', people: 'คน', person: 'คน', hand: 'มือ', smile: 'ยิ้ม', emoji: 'อีโมจิ', check: 'ถูก',
+  phone: 'โทรศัพท์', computer: 'คอมพิวเตอร์', light: 'ไฟ', bubble: 'คำพูด', speech: 'คำพูด', number: 'ตัวเลข', letter: 'ตัวอักษร',
+};
+/** Does `txt` match every word of the query (English words also match their Thai label)? */
+export function searchMatch(txt, q) {
   const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
-  const hit = (txt) => terms.every((t) => txt.includes(t));
+  txt = txt.toLowerCase();
+  return terms.every((t) => txt.includes(t) || (EN_TH[t] && txt.includes(EN_TH[t])));
+}
+export function elementsSearchHTML(gfx, q) {
+  const hit = (txt) => searchMatch(txt, q);
   const shapes = SHAPE_FAMILIES.flatMap((f) => f.items.map((it, i) => ({ f, i, txt: `${f.title} ${it.label} รูปทรง`.toLowerCase() }))).filter((x) => hit(x.txt));
   const g = (gfx || []).flatMap((c) => c.items.map((it) => ({ c, it, txt: `${c.title} ${it[0].replace(/-/g, ' ')} ${it[4] || ''}`.toLowerCase() }))).filter((x) => hit(x.txt));
   const frs = FRAME_SHAPES.filter((x) => hit(`รูปทรง ${x.label}`.toLowerCase()));
