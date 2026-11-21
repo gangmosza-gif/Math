@@ -48,8 +48,20 @@ const pageErrors = [];
 let section = '';
 
 const UNTIL = +process.env.UNTIL || Infinity; // run only sections <= UNTIL (debugging)
+const ONLY = +process.env.ONLY || 0; // run a single section (the editor is opened first when needed)
+let booted = false;
 async function step(name, fn) {
   if (parseInt(section, 10) > UNTIL) return;
+  if (ONLY && parseInt(section, 10) !== ONLY) return;
+  if (ONLY && ONLY !== 1 && !booted) {
+    booted = true;
+    await page.goto(URL);
+    await page.waitForSelector('.preset[data-preset="0"]');
+    await page.click('.preset[data-preset="0"]');
+    await page.waitForSelector('.canvas-container');
+    await page.waitForFunction(() => window.__lai && window.__lai.canvas);
+    await page.waitForTimeout(600);
+  }
   const t0 = Date.now();
   try {
     await fn();
