@@ -782,6 +782,12 @@ export const features = {
 
   async dropAct(act, e) {
     const pt = this.canvas.getScenePoint(e);
+    // a picture dropped on a frame (or any picture) goes INTO it, keeping the frame's size and shape
+    const target = this.imageAt(pt);
+    if (target && /^(up-add|logo-add|photo|pattern|gfx):/.test(act)) {
+      const url = await this.actImageURL(act);
+      if (url) return this.replaceImage(target, url);
+    }
     const before = new Set(this.canvas.getObjects());
     await this.panelAction(act);
     const o = this.canvas.getActiveObject();

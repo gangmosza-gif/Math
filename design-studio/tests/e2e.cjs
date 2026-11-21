@@ -1056,6 +1056,72 @@ function meanDiff(a, b) {
     await wait(500);
     assert((await ev(() => __lai.canvas.getObjects().filter((o) => o.placeholder).length)) === 8, 'frames');
   });
+  await step('กรอบรูปทรงเรขาคณิต/ออร์แกนิก 26 แบบใหม่: ใส่รูปลงกรอบ (ลากจากแผง) ซูมและเลื่อนรูปในกรอบ เปลี่ยนรูปทรงกรอบ บันทึกและส่งออก', async () => {
+    await clearPage();
+    await panel('elements');
+    const n = await page.$$eval('[data-act^="frame:"]', (e) => e.length);
+    assert(n >= 34, `frames ${n}`);
+    // every new frame shape: clipped placeholder whose box follows the shape's proportions
+    const shapes = await ev(async () => {
+      const L = __lai;
+      const out = [];
+      const btns = [...document.querySelectorAll('[data-act^="frame:"]')].slice(8);
+      for (const b of btns) {
+        await L.panelAction(b.dataset.act);
+        const o = L.canvas.getActiveObject();
+        out.push([o.mask, !!o.clipPath, o.placeholder, Math.round((o.getScaledWidth() / o.getScaledHeight()) * 100) / 100]);
+      }
+      return out;
+    });
+    assert(shapes.length === n - 8 && shapes.every(([m, cp, ph]) => m && cp && ph), JSON.stringify(shapes.filter(([m, cp, ph]) => !(m && cp && ph))));
+    const tri = shapes.find((s) => s[0] === 'triangle'), arch = shapes.find((s) => s[0] === 'arch');
+    assert(Math.abs(tri[3] - 1.15) < 0.05 && arch[3] < 0.9, `proportions ${tri} ${arch}`);
+    // drop a picture from the uploads panel onto a frame → it fills the frame, keeps size & shape
+    await clearPage();
+    await panel('elements');
+    await page.click(`[data-act^="frame:"][title="กรอบรูป สามเหลี่ยม"]`);
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.mask === 'triangle');
+    const before = await ev(() => { const o = __lai.canvas.getActiveObject(); return [Math.round(o.getScaledWidth()), Math.round(o.getScaledHeight())]; });
+    await panel('uploads');
+    await page.waitForSelector('.up-img');
+    const upAct = await page.$eval('.up-img', (b) => b.dataset.act);
+    const p0 = await screenPoint(0);
+    await page.evaluate(({ act, x, y }) => {
+      const dt = new DataTransfer();
+      dt.setData('application/x-lai-act', act);
+      document.querySelector('[data-ws]').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+    }, { act: upAct, x: p0.x, y: p0.y });
+    await page.waitForFunction(() => __lai.canvas.getObjects().length === 1 && !__lai.canvas.getObjects()[0].placeholder);
+    const after = await ev(() => { const o = __lai.canvas.getObjects()[0]; return [Math.round(o.getScaledWidth()), Math.round(o.getScaledHeight()), o.mask, !!o.clipPath]; });
+    assert(Math.abs(after[0] - before[0]) <= 2 && Math.abs(after[1] - before[1]) <= 2 && after[2] === 'triangle' && after[3], `filled ${before} → ${after}`);
+    // zoom + move the picture inside the frame (frame keeps its size)
+    await selectIndex(0);
+    await page.click('[data-act="crop-mode"]');
+    const z0 = await ev(() => [__lai.canvas.getObjects().find((o) => !o.cropUI).scaleX, __lai._crop.img.width]);
+    await page.$eval('[data-crop-zoom]', (r) => { r.value = 200; r.dispatchEvent(new Event('input', { bubbles: true })); });
+    const g = await ev(() => { const g = __lai._crop.ghost; g.setCoords(); const r = __lai.canvas.upperCanvasEl.getBoundingClientRect(); const p = g.oCoords.tl; return { x: r.left + p.x + 8, y: r.top + p.y + 8 }; });
+    await page.mouse.move(g.x, g.y); await page.mouse.down(); await page.mouse.move(g.x + 30, g.y + 20, { steps: 5 }); await page.mouse.up();
+    await page.keyboard.press('Enter');
+    await wait(150);
+    const z1 = await ev(() => { const o = __lai.canvas.getObjects()[0]; return [o.scaleX, o.width, Math.round(o.getScaledWidth()), Math.round(o.getScaledHeight()), o.mask, !!o.clipPath]; });
+    assert(Math.abs(z1[0] / z0[0] - 2) < 0.02 && Math.abs(z1[1] / z0[1] - 0.5) < 0.02, `zoom ${z0} → ${z1}`);
+    assert(Math.abs(z1[2] - before[0]) <= 2 && Math.abs(z1[3] - before[1]) <= 2 && z1[4] === 'triangle' && z1[5], `frame size kept ${z1}`);
+    // change the frame shape of a picture from the "กรอบ" popover
+    await page.click('[data-act="pop:mask"]');
+    assert((await page.$$('.mask-grid [data-m]')).length >= 32, 'mask choices');
+    await page.click('.mask-grid [data-m="cloud"]');
+    await page.keyboard.press('Escape');
+    assert((await ev(() => __lai.canvas.getObjects()[0].mask)) === 'cloud', 'mask cloud');
+    // saved & reloaded with the page, exported
+    await ev(() => __lai.commit());
+    await ev(() => __lai.loadPage(__lai.cur));
+    await wait(400);
+    assert((await ev(() => { const o = __lai.canvas.getObjects()[0]; return o.mask === 'cloud' && !!o.clipPath; })), 'mask after reload');
+    const png = await exportAs('png', { pages: 'cur' });
+    assert(isPNG(png), 'png');
+    await clearPage();
+    await panel('elements'); // leave the panel as the next steps expect
+  });
   await step('ตารางรูป (กริด) 6 แบบ ช่องไม่ล้นหน้า', async () => {
     await clearPage();
     const expect = [2, 2, 3, 4, 6, 4];

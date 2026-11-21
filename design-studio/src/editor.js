@@ -19,6 +19,7 @@ import { fileToDataURL } from './imageutil.js';
 import { features, SMART_LABEL, BRAND_FONT_KINDS } from './features.js';
 import { rulers } from './rulers.js';
 import { FRAMES, GRIDS, MOCKUPS, CHART_TYPES } from './smart.js';
+import { FRAME_SHAPES, isFrameShape, frameClipPath, framePreview } from './frames.js';
 
 const CHART_ICON = { bar: '📊', 'bar-group': '📊', 'bar-stack': '▥', 'bar-stack100': '▥', hbar: '☰', 'hbar-group': '☰', 'hbar-stack': '☰', waterfall: '⛲', lollipop: '🍭',
   line: '📈', 'line-multi': '📈', 'line-smooth': '〰', step: '⌐', area: '◭', 'area-stack': '◭', pie: '◔', donut: '◎', halfdonut: '◠', polar: '✿', radial: '◉',
@@ -288,7 +289,7 @@ export class Editor {
     const sx = img.scaleX, sy = img.scaleY;
     const tl = util.transformPoint(new Point(-img.width / 2, -img.height / 2), img.calcTransformMatrix());
     const { width: nw, height: nh } = img.getOriginalSize();
-    const saved = { cropX: img.cropX || 0, cropY: img.cropY || 0, width: img.width, height: img.height, left: img.left, top: img.top, crop: img.crop ? { ...img.crop } : undefined, evented: img.evented, selectable: img.selectable };
+    const saved = { scaleX: img.scaleX, scaleY: img.scaleY, cropX: img.cropX || 0, cropY: img.cropY || 0, width: img.width, height: img.height, left: img.left, top: img.top, crop: img.crop ? { ...img.crop } : undefined, evented: img.evented, selectable: img.selectable };
     const ui = { excludeFromExport: true, cropUI: true, originX: 'left', originY: 'top', hasRotatingPoint: false, lockRotation: true, objectCaching: false };
     const ghost = new FabricImage(img.getElement(), {
       ...ui, left: tl.x - saved.cropX * sx, top: tl.y - saved.cropY * sy, scaleX: sx, scaleY: sy,
@@ -305,7 +306,7 @@ export class Editor {
     ghost.ghost = true; frame.frame = true;
     img.set({ evented: false, selectable: false });
     c.discardActiveObject();
-    this._crop = { img, ghost, frame, saved, sx, sy, nw, nh, ratio: 0 };
+    this._crop = { img, ghost, frame, saved, sx, sy, sx0: sx, sy0: sy, zoom: 1, nw, nh, ratio: 0 };
     c.insertAt(c.getObjects().indexOf(img), ghost);
     c.add(frame);
     c.setActiveObject(frame);
@@ -353,7 +354,7 @@ export class Editor {
     const fw = f.width * f.scaleX, fh = f.height * f.scaleY;
     const cropX = Math.max(0, (f.left - g.left) / sx), cropY = Math.max(0, (f.top - g.top) / sy);
     const width = Math.min(nw - cropX, fw / sx), height = Math.min(nh - cropY, fh / sy);
-    img.set({ cropX, cropY, width, height });
+    img.set({ cropX, cropY, width, height, scaleX: sx, scaleY: sy });
     img.setPositionByOrigin(new Point(f.left + fw / 2, f.top + fh / 2), 'center', 'center');
     const pc = (v) => Math.round(v * 1000) / 10;
     img.crop = { l: pc(cropX / nw), t: pc(cropY / nh), r: pc((nw - cropX - width) / nw), b: pc((nh - cropY - height) / nh) };
@@ -383,6 +384,22 @@ export class Editor {
     f.setCoords();
     this.canvas.setActiveObject(f);
     this.syncCrop();
+  }
+
+  /** Zoom the picture inside the crop window / frame (the window keeps its size and place). */
+  cropZoom(z) {
+    const k = this._crop;
+    if (!k) return;
+    const { ghost: g, frame: f, nw, nh } = k;
+    const fw = f.width * f.scaleX, fh = f.height * f.scaleY;
+    const zMin = Math.max(fw / (nw * k.sx0), fh / (nh * k.sy0));
+    z = Math.max(zMin, Math.min(4, z));
+    const cx = f.left + fw / 2, cy = f.top + fh / 2;
+    const u = (cx - g.left) / k.sx, v = (cy - g.top) / k.sy; // picture point under the window centre stays put
+    k.zoom = z; k.sx = k.sx0 * z; k.sy = k.sy0 * z;
+    g.set({ scaleX: k.sx, scaleY: k.sy, left: cx - u * k.sx, top: cy - v * k.sy });
+    this.clampCrop(g, 'move');
+    return z;
   }
 
   cropReset() {
@@ -416,7 +433,7 @@ export class Editor {
     const { img, ghost, frame, saved } = k;
     if (apply) this.syncCrop();
     else {
-      img.set({ cropX: saved.cropX, cropY: saved.cropY, width: saved.width, height: saved.height, left: saved.left, top: saved.top });
+      img.set({ scaleX: saved.scaleX, scaleY: saved.scaleY, cropX: saved.cropX, cropY: saved.cropY, width: saved.width, height: saved.height, left: saved.left, top: saved.top });
       img.crop = saved.crop;
       this.applyMask(img, img.mask);
       img.set('dirty', true);
@@ -1481,10 +1498,13 @@ export class Editor {
         <button class="tool" data-act="crop-ratio:0.8" title="4:5"><span>4:5</span></button>
         <button class="tool" data-act="crop-reset" title="กลับเป็นรูปเต็ม"><span>รีเซ็ต</span></button>
         <button class="tool" data-act="crop-pct" title="ปรับเป็นเปอร์เซ็นต์ด้วยสไลเดอร์"><span>%</span></button>
+        <label class="crop-zoom" title="ซูมรูปในกรอบ">${icon('zoomIn', 16)}<input type="range" min="20" max="400" step="1" value="${Math.round((this._crop.zoom || 1) * 100)}" data-crop-zoom aria-label="ซูมรูปในกรอบ"></label>
         <span class="grow"></span>
         <button class="tool" data-act="crop-cancel" title="ยกเลิก (Esc)"><span>ยกเลิก</span></button>
         <button class="btn primary sm" data-act="crop-done" title="เสร็จสิ้น (Enter)">เสร็จสิ้น</button>`;
       bar.dataset.kind = 'crop';
+      const zr = bar.querySelector('[data-crop-zoom]');
+      zr.addEventListener('input', () => { const z = this.cropZoom(+zr.value / 100); if (z && Math.abs(z * 100 - +zr.value) > 1) zr.value = Math.round(z * 100); });
       return;
     }
     if (kind === 'page') {
@@ -2073,6 +2093,7 @@ export class Editor {
         <div class="mask-grid">
           ${[['none', '▢', 'ไม่มี'], ['rounded', '▢', 'มุมมน'], ['circle', '●', 'วงกลม'], ['star', '★', 'ดาว'], ['heart', '♥', 'หัวใจ'], ['hexagon', '⬢', 'หกเหลี่ยม']]
             .map(([k, s, l]) => `<button class="${(a.mask || 'none') === k ? 'on' : ''}" data-m="${k}"><b>${s}</b>${l}</button>`).join('')}
+          ${FRAME_SHAPES.map((f) => `<button class="${a.mask === f.k ? 'on' : ''}" data-m="${f.k}" title="${f.label}"><b class="mask-svg">${framePreview(f.k, 'currentColor')}</b>${f.label}</button>`).join('')}
         </div>
         <div class="cp-title">กรอบเส้น</div>
         <label class="toggle-row">สีกรอบ <button class="swatch-btn sm" data-act-color="stroke"><span style="background:${colorCss(a.stroke)}"></span></button></label>
@@ -2111,6 +2132,7 @@ export class Editor {
       });
       cp = new Polygon(pts, base);
     }
+    if (isFrameShape(kind)) cp = frameClipPath(kind, w, hh);
     if (kind === 'heart') {
       cp = new Path('M50 90 C20 70 0 52 0 30 C0 12 14 0 30 0 C40 0 47 6 50 14 C53 6 60 0 70 0 C86 0 100 12 100 30 C100 52 80 70 50 90 Z', base);
       const k = s / 100;
@@ -2227,7 +2249,7 @@ export class Editor {
         <div class="sec-title">ม็อกอัป (ใส่รูปในอุปกรณ์)</div>
         <div class="smart-grid">${MOCKUPS.map(([k, ic, l]) => `<button class="smart-btn" data-act="smart:mockup-${k}" title="ม็อกอัป ${l}"><b>${ic}</b><span>${l}</span></button>`).join('')}</div>
         <div class="sec-title">กรอบรูป</div>
-        <div class="el-grid">${FRAMES.map(([l, m, r], i) => `<button class="el" data-act="frame:${i}" title="กรอบรูป ${l}"><span class="frame-prev ${m}" style="aspect-ratio:${r}"></span></button>`).join('')}</div>
+        <div class="el-grid">${FRAMES.map(([l, m, r], i) => `<button class="el" data-act="frame:${i}" title="กรอบรูป ${l}">${isFrameShape(m) ? `<span class="frame-svg">${framePreview(m)}</span>` : `<span class="frame-prev ${m}" style="aspect-ratio:${r}"></span>`}</button>`).join('')}</div>
         <div class="sec-title">ตารางรูป (กริด)</div>
         <div class="el-grid">${GRIDS.map(([l, cells], i) => `<button class="el" data-act="grid:${i}" title="กริด ${l}"><svg viewBox="0 0 60 60" width="100%" height="100%">${cells.map(([x, y, w, hh]) => `<rect x="${x * 52 + 5}" y="${y * 52 + 5}" width="${w * 52 - 2}" height="${hh * 52 - 2}" rx="2" fill="#cfc8ec"/>`).join('')}</svg></button>`).join('')}</div>
         <div class="sec-title">เส้น</div>
@@ -2549,6 +2571,29 @@ export class Editor {
       case 'layer-lock': { const o = objAt(arg); if (o) { o.locked = !o.locked; this.applyLock(o); this.canvas.requestRenderAll(); this.commit(); } return; }
       default: return false;
     }
+  }
+
+  /** The picture behind a panel action (for dropping it into a frame). */
+  async actImageURL(act) {
+    const [k, arg] = [act.slice(0, act.indexOf(':')), act.slice(act.indexOf(':') + 1)];
+    if (k === 'up-add') return (this._uploads || []).find((x) => x.id === arg)?.url;
+    if (k === 'logo-add') return (this._logos || []).find((x) => x.id === arg)?.url;
+    if (k === 'pattern') return PATTERNS[+arg]?.url;
+    if (k === 'photo') {
+      try {
+        const res = await fetch(`https://picsum.photos/id/${arg}/1600/1200`);
+        if (!res.ok) throw new Error(res.status);
+        const blob = await res.blob();
+        return await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+      } catch { toast('โหลดรูปไม่สำเร็จ (ต้องต่ออินเทอร์เน็ต)', 'error'); return null; }
+    }
+    if (k === 'gfx') {
+      // only picture-like graphics (colour stickers / our illustrations) fill a frame
+      const o = await makeElement(this._gfx, arg, 1024).catch(() => null);
+      if (o && isImage(o)) return o.getSrc();
+      return null;
+    }
+    return null;
   }
 
   async addPhoto(id, asBg) {

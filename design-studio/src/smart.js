@@ -1,3 +1,4 @@
+import { FRAME_SHAPES } from './frames.js';
 // "Smart" elements rebuilt from data: tables, charts, QR codes, equations, image placeholders.
 // Each returns a fabric object carrying `smart = { type, ...data }` so it can be edited later.
 import { Group, Rect, Textbox, Line, Polyline, Polygon, Circle, Path, FabricText, FabricImage, Shadow, loadSVGFromString, util } from 'fabric';
@@ -174,6 +175,8 @@ export const FRAMES = [
   ['สี่เหลี่ยม', 'none', 1], ['มุมมน', 'rounded', 1], ['วงกลม', 'circle', 1],
   ['ดาว', 'star', 1], ['หัวใจ', 'heart', 1], ['หกเหลี่ยม', 'hexagon', 1],
   ['แนวนอน 16:9', 'rounded', 16 / 9], ['แนวตั้ง 3:4', 'rounded', 3 / 4],
+  // geometric and organic frames (shape fills the frame box)
+  ...FRAME_SHAPES.map((f) => [f.label, f.k, f.ratio]),
 ];
 
 // grids: list of [x, y, w, h] fractions of the page (with margins handled by caller)
