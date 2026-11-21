@@ -328,9 +328,9 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); }
 .mask-grid button.on { border-color: var(--accent); background: var(--accent-soft); }
 
 /* ---------- modal ---------- */
-.modal-back { position: fixed; inset: 0; background: rgba(10, 12, 25, 0.45); display: grid; place-items: center; z-index: 100; padding: 16px; }
-.modal { background: var(--surface); border-radius: 14px; width: 440px; max-width: 100%; max-height: calc(100vh - 32px); display: flex; flex-direction: column; box-shadow: var(--shadow); }
-.modal.wide { width: 640px; }
+.modal-back { position: fixed; inset: 0; background: rgba(10, 12, 25, 0.45); display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; z-index: 100; padding: 16px; }
+.modal { background: var(--surface); border-radius: 14px; width: min(440px, 100%); max-width: 100%; min-width: 0; max-height: calc(100vh - 32px); display: flex; flex-direction: column; box-shadow: var(--shadow); }
+.modal.wide { width: min(640px, 100%); }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 6px 20px; }
 .modal-head h2 { margin: 0; font-size: 18px; }
 .modal-body { padding: 8px 20px 18px; overflow-y: auto; }
@@ -680,3 +680,6 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
   .panel.draw-compact .seg button { padding: 6px; }
 }
 .modal-actions.col { flex-direction: column; align-items: stretch; gap: 8px; }
+
+/* format cards never force the dialog wider than a small phone */
+.fmt { min-width: 0; } .fmt b, .fmt small { overflow-wrap: anywhere; }

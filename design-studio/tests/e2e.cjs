@@ -2845,6 +2845,30 @@ function meanDiff(a, b) {
       assert(after !== before, 'finger drag moves the object');
     } finally { await pctx.close(); }
   });
+  await step('มือถือจอเล็ก (iPhone SE 320px): หน้าต่างดาวน์โหลดและป๊อปอัปทั้งหมดอยู่ในจอ ปุ่ม "ดาวน์โหลด" กดได้', async () => {
+    const pctx = await browser.newContext({ ...devices['iPhone SE'] });
+    const mp = await pctx.newPage();
+    try {
+      await mp.goto(URL); await mp.waitForSelector('.preset[data-preset="0"]');
+      await mp.click('.preset[data-preset="0"]'); await mp.waitForFunction(() => window.__lai && __lai.canvas); await mp.waitForTimeout(400);
+      const fits = () => mp.evaluate(() => [...document.querySelectorAll('.modal, .popover')].every((e) => { const r = e.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; }) && document.documentElement.scrollWidth <= innerWidth + 1);
+      await mp.click('[data-act="export"]'); await mp.waitForSelector('.modal [data-go]');
+      assert(await fits(), 'export dialog wider than the phone');
+      const go = await mp.$('.modal [data-go]');
+      await go.scrollIntoViewIfNeeded();
+      const r = await go.boundingBox();
+      assert(r.x >= 0 && r.x + r.width <= 321, 'download button off screen ' + JSON.stringify(r));
+      await mp.keyboard.press('Escape');
+      await mp.evaluate(async () => { await __lai.addText('heading'); __lai.openPanel(null); });
+      await mp.waitForTimeout(300);
+      for (const a of await mp.$$eval('[data-ctx] [data-act^="pop:"], [data-ctx] [data-act^="color:"]', (e) => e.map((x) => x.dataset.act))) {
+        await mp.click(`[data-ctx] [data-act="${a}"]`); await mp.waitForTimeout(150);
+        assert(await fits(), 'popover off screen: ' + a);
+        await mp.keyboard.press('Escape');
+        await mp.evaluate(() => { const o = __lai.canvas.getObjects()[0]; __lai.canvas.setActiveObject(o); __lai.renderCtx(); });
+      }
+    } finally { await pctx.close(); }
+  });
 
   await step('[F1] ฟอนต์โหลดช้า: ตารางจัดเรียงใหม่อัตโนมัติเมื่อฟอนต์มาถึง และไม่เพิ่มขั้นเลิกทำ', async () => {
     const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true });
