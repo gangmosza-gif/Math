@@ -2897,6 +2897,23 @@ function meanDiff(a, b) {
     await c2.close();
   });
   group('15. ความเสถียร');
+  await step('ทำสำเนาซ้อนกันเร็ว ๆ (Ctrl+D ค้าง) ไม่พังและได้ครบทุกชิ้น · บันทึกลงเครื่องไม่ได้ (พื้นที่เต็ม) มีข้อความบอกวิธีเก็บงาน', async () => {
+    const keep = await ev(() => __lai.serialize());
+    await clearPage();
+    await ev(async () => { await __lai.addShape(0); __lai.canvas.setActiveObject(__lai.canvas.getObjects()[0]); await Promise.all(Array.from({ length: 6 }, () => __lai.duplicate())); });
+    await wait(300);
+    assert((await objCount()) === 7, 'concurrent duplicates ' + (await objCount()));
+    await ev(() => { const orig = IDBObjectStore.prototype.put; window.__restorePut = () => { IDBObjectStore.prototype.put = orig; }; IDBObjectStore.prototype.put = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); }; });
+    try {
+      await ev(async () => { await __lai.addShape(1); __lai.commit(); await __lai.saveNow(); });
+      await page.waitForSelector('.toast.error', { timeout: 3000 });
+      assert(/พื้นที่เก็บข้อมูล.*เต็ม/.test(await page.textContent('.toast.error')), 'storage-full message');
+      assert(/ไม่สำเร็จ/.test(await page.textContent('[data-status]')), 'status');
+    } finally { await ev(() => window.__restorePut()); }
+    await ev(async () => { await __lai.saveNow(); });
+    assert(!/ไม่สำเร็จ/.test(await page.textContent('[data-status]')), 'saves again after space is back');
+    await ev(async (j) => { await __lai.canvas.loadFromJSON(JSON.parse(j)); __lai.canvas.requestRenderAll(); __lai.commit(); }, keep);
+  });
   await step('ไม่มี JavaScript error ตลอดการทดสอบ', async () => {
     assert(pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   });

@@ -1065,11 +1065,18 @@ export class Editor {
       this.design.rev = Math.max(this._rev, stored?.rev || 0) + 1;
       this._rev = this.design.rev;
       await saveDesign(JSON.parse(JSON.stringify(this.design)));
+      this._saveErrShown = false;
       this.updateStatus('saved');
       if (this.hIndex > 0) this.maybeAutoVersion().catch(() => {});
     } catch (e) {
       console.error(e);
       this.updateStatus('error');
+      // say it once (until a save works again): the work is NOT being kept
+      if (!this._saveErrShown) {
+        this._saveErrShown = true;
+        const full = /quota/i.test(`${e && e.name} ${e && e.message}`);
+        toast(`${full ? 'พื้นที่เก็บข้อมูลของเบราว์เซอร์เต็ม' : 'บันทึกงานลงเครื่องไม่สำเร็จ'} — งานล่าสุดยังไม่ถูกบันทึก ให้กด ไฟล์ › บันทึกไฟล์โปรเจกต์ (.json) เก็บไว้ก่อน${full ? ' แล้วลบงานหรือรูปที่ไม่ใช้ในหน้าแรก' : ''}`, 'error', 12000);
+      }
     }
   }
 
@@ -1620,10 +1627,11 @@ export class Editor {
     } catch { /* ignore broken clipboard */ }
   }
 
-  async paste({ shared = true } = {}) {
-    if (shared) await this.loadSharedClipboard();
-    if (!this.clipboard) return;
-    const c = await this.clipboard.clone(EXTRA);
+  async paste({ shared = true, source = null } = {}) {
+    if (!source && shared) await this.loadSharedClipboard();
+    const src = source || this.clipboard;
+    if (!src) return;
+    const c = await src.clone(EXTRA);
     this.canvas.discardActiveObject();
     const d = this.U * 0.03;
     c.set({ left: c.left + d, top: c.top + d, evented: true });
@@ -1634,7 +1642,8 @@ export class Editor {
     } else {
       this.canvas.add(c);
     }
-    this.clipboard.set({ left: this.clipboard.left + d, top: this.clipboard.top + d });
+    // the next paste of the same clipboard lands a step further (duplicates use their own copy)
+    if (!source && this.clipboard) this.clipboard.set({ left: this.clipboard.left + d, top: this.clipboard.top + d });
     this.canvas.setActiveObject(c);
     this.canvas.requestRenderAll();
     this.commit();
@@ -1643,10 +1652,8 @@ export class Editor {
   async duplicate() {
     const a = this.canvas.getActiveObject();
     if (!a) return;
-    const saved = this.clipboard;
-    this.clipboard = await a.clone(EXTRA);
-    await this.paste({ shared: false });
-    this.clipboard = saved;
+    // never borrow the clipboard: two quick duplicates (or Ctrl+D held down) would race on it
+    await this.paste({ source: await a.clone(EXTRA) });
   }
 
   deleteSelection() {
