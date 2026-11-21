@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "test": "node tests/e2e.cjs && node tests/office.cjs",
     "test:office": "node tests/office.cjs",
-    "test:docs": "node tests/docs.cjs"
+    "test:docs": "node tests/docs.cjs",
+    "illus:prompts": "python3 illustrations/build_prompts.py",
+    "illus:check": "python3 tools/check_illustrations.py",
+    "illus:import": "python3 tools/import_illustrations.py",
+    "test:illus": "python3 tests/illustrations_test.py"
   },
   "dependencies": {
     "docx": "^9.16.0",

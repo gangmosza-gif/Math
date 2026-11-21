@@ -12,7 +12,7 @@ export { safeURL };
 import { saveDesign, listUploads, saveUpload, deleteUpload, uid } from './storage.js';
 import { PRESETS } from './presets.js';
 import { PATTERNS, PHOTO_LIBRARY } from './patterns.js';
-import { loadGraphics, elementsHomeHTML, elementsViewHTML, elementsSearchHTML, makeElement, recolorGraphic } from './elements.js';
+import { loadGraphics, loadIllustrations, setIllustrations, elementsHomeHTML, elementsViewHTML, elementsSearchHTML, makeElement, recolorGraphic } from './elements.js';
 import { docSettings, hasDoc, docDecorations, decorationObjects, decorationFonts, visibleNumber, PAGE_NUM_FORMATS, WATERMARK_PRESETS, BORDER_STYLES } from './docsetup.js';
 import { Vignette, warmthMatrix, tintMatrix, duotoneMatrix, sharpen } from './filters.js';
 import { fileToDataURL } from './imageutil.js';
@@ -2201,6 +2201,7 @@ export class Editor {
     } else if (p === 'elements') {
       const gfx = this._gfx || null;
       if (!gfx) loadGraphics().then((g) => { this._gfx = g; if (this.panel === 'elements') this.renderPanel(); }).catch((e) => console.error('graphics', e));
+      if (!this._illLoaded) { this._illLoaded = true; loadIllustrations().then((items) => { setIllustrations(items); if (items.length && this.panel === 'elements') this.renderPanel(); }); }
       const view = this._elView || '';
       if (view && gfx) {
         body.innerHTML = `<div class="el-view">${elementsViewHTML(gfx, view)}</div>`;
@@ -2491,7 +2492,11 @@ export class Editor {
       case 'shape': return this.addShape(+arg);
       case 'gfx': {
         const id = act.slice(4);
-        return makeElement(this._gfx, id, this.U * 0.3).then((o) => o && this.addObject(o)).catch((e) => { console.error(e); toast('เพิ่มกราฟิกไม่สำเร็จ', 'error'); });
+        return makeElement(this._gfx, id, this.U * 0.35).then((o) => {
+          if (!o) return;
+          if (o.sceneURL) return this.setBackgroundImage(o.sceneURL);
+          return this.addObject(o);
+        }).catch((e) => { console.error(e); toast('เพิ่มกราฟิกไม่สำเร็จ', 'error'); });
       }
       case 'line': return this.addShape(+arg, LINES);
       case 'sticker': return this.addObject(Object.assign(makeSticker(STICKERS[+arg], this.U * 0.25), { name: 'สติกเกอร์' }));

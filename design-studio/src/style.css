@@ -643,3 +643,4 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 .el-view-head b { font-size: 16px; }
 .el-view-head .hint { margin-left: auto; }
 .credit { font-size: 11px; color: var(--muted); margin-top: 12px; }
+.el-grid.gfx-grid.scenes { grid-template-columns: repeat(2, 1fr); } .el-grid.gfx-grid.scenes .el.gfx { aspect-ratio: 3/2; padding: 0; overflow: hidden; } .el-grid.gfx-grid.scenes img { object-fit: cover; }

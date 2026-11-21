@@ -1,0 +1,133 @@
+# ชุดที่ 22 · สุขภาพ
+
+สไตล์: S1 ลายเส้นน่ารัก (doodle) · 8 ภาพ
+
+**วิธีใช้** (ทำตามทุกครั้ง)
+
+1. เปิด **แชตใหม่** แล้ว **แนบภาพตั้งต้นของสไตล์ S1** จากชุด 00 (เช่น `s1-anchor-*.png`) พร้อมพิมพ์ประโยคแรกนี้ก่อน:
+   > I will send you 8 separate image requests. Use exactly the same art style, line weight and colour palette as the attached reference image for every image. Make one image per request.
+2. ส่งคำสั่งด้านล่าง **ทีละข้อ** รอภาพเสร็จก่อนส่งข้อต่อไป (อย่าส่งหลายข้อในข้อความเดียว จะทำให้ภาพมั่ว)
+3. ดาวน์โหลดเป็น PNG ตั้งชื่อไฟล์ตามที่ระบุ ใส่ไว้ในโฟลเดอร์ `illustrations/inbox/batch-22/`
+4. ถ้าภาพมีตัวหนังสือ มือผิดรูป หรือไม่ตรงคำสั่ง ให้พิมพ์ "Please regenerate. Problems: …" แล้วระบุปัญหา
+
+5. ครบชุดแล้วส่งภาพมาให้ Claude ตรวจ (หรือรัน `npm run illus:check -- illustrations/inbox/batch-22`) ก่อนนำเข้าทุกครั้ง
+
+
+---
+
+### 22-01 · หมอ
+
+ไฟล์: `s1-health-doctor.png` · 1024×1024 (square) · พื้นหลังโปร่งใส · สไตล์ S1
+
+```text
+Cute hand-drawn doodle illustration. Thick, slightly uneven black outlines (about 6 px at 1024 px). Flat pastel fills only from this palette: cream #FFF4D6, mint #BDE7D2, sky blue #AFD8F2, peach #F9C7A8, lilac #D8C8F0, butter yellow #FBE38E, coral #F28B82, plus black for outlines. No gradients, no realistic shading, at most one flat darker shadow shape per object. Friendly, simple, rounded shapes. People have simple round faces with dot eyes and simple mitten-like hands.
+
+Subject: A friendly doctor in a white coat with a stethoscope.
+
+Canvas: 1024×1024 (square). Exactly ONE subject (or exactly the people listed), centred, the whole subject fully visible with an empty margin of at least 10% on every side. Transparent background (PNG with alpha channel). If transparency is not possible, use a plain pure white #FFFFFF background. Do NOT draw: any text, letters, numbers, words, Thai or English characters, logos, brand marks, watermark, signature, frame, border, ground line, or a checkerboard pattern.
+```
+
+
+---
+
+### 22-02 · พยาบาล
+
+ไฟล์: `s1-health-nurse.png` · 1024×1024 (square) · พื้นหลังโปร่งใส · สไตล์ S1
+
+```text
+Cute hand-drawn doodle illustration. Thick, slightly uneven black outlines (about 6 px at 1024 px). Flat pastel fills only from this palette: cream #FFF4D6, mint #BDE7D2, sky blue #AFD8F2, peach #F9C7A8, lilac #D8C8F0, butter yellow #FBE38E, coral #F28B82, plus black for outlines. No gradients, no realistic shading, at most one flat darker shadow shape per object. Friendly, simple, rounded shapes. People have simple round faces with dot eyes and simple mitten-like hands.
+
+Subject: A friendly nurse in a white uniform holding a clipboard.
+
+Canvas: 1024×1024 (square). Exactly ONE subject (or exactly the people listed), centred, the whole subject fully visible with an empty margin of at least 10% on every side. Transparent background (PNG with alpha channel). If transparency is not possible, use a plain pure white #FFFFFF background. Do NOT draw: any text, letters, numbers, words, Thai or English characters, logos, brand marks, watermark, signature, frame, border, ground line, or a checkerboard pattern.
+```
+
+
+---
+
+### 22-03 · หูฟังแพทย์
+
+ไฟล์: `s1-health-stethoscope.png` · 1024×1024 (square) · พื้นหลังโปร่งใส · สไตล์ S1
+
+```text
+Cute hand-drawn doodle illustration. Thick, slightly uneven black outlines (about 6 px at 1024 px). Flat pastel fills only from this palette: cream #FFF4D6, mint #BDE7D2, sky blue #AFD8F2, peach #F9C7A8, lilac #D8C8F0, butter yellow #FBE38E, coral #F28B82, plus black for outlines. No gradients, no realistic shading, at most one flat darker shadow shape per object. Friendly, simple, rounded shapes. People have simple round faces with dot eyes and simple mitten-like hands.
+
+Subject: A stethoscope.
+
+Canvas: 1024×1024 (square). Exactly ONE subject (or exactly the people listed), centred, the whole subject fully visible with an empty margin of at least 10% on every side. Transparent background (PNG with alpha channel). If transparency is not possible, use a plain pure white #FFFFFF background. Do NOT draw: any text, letters, numbers, words, Thai or English characters, logos, brand marks, watermark, signature, frame, border, ground line, or a checkerboard pattern.
+```
+
+
+---
+
+### 22-04 · ยา
+
+ไฟล์: `s1-health-pills.png` · 1024×1024 (square) · พื้นหลังโปร่งใส · สไตล์ S1
+
+```text
+Cute hand-drawn doodle illustration. Thick, slightly uneven black outlines (about 6 px at 1024 px). Flat pastel fills only from this palette: cream #FFF4D6, mint #BDE7D2, sky blue #AFD8F2, peach #F9C7A8, lilac #D8C8F0, butter yellow #FBE38E, coral #F28B82, plus black for outlines. No gradients, no realistic shading, at most one flat darker shadow shape per object. Friendly, simple, rounded shapes. People have simple round faces with dot eyes and simple mitten-like hands.
+
+Subject: A pill bottle and two capsules.
+
+Canvas: 1024×1024 (square). Exactly ONE subject (or exactly the people listed), centred, the whole subject fully visible with an empty margin of at least 10% on every side. Transparent background (PNG with alpha channel). If transparency is not possible, use a plain pure white #FFFFFF background. Do NOT draw: any text, letters, numbers, words, Thai or English characters, logos, brand marks, watermark, signature, frame, border, ground line, or a checkerboard pattern.
+```
+
+
+---
+
+### 22-05 · ล้างมือ
+
+ไฟล์: `s1-health-hand-washing.png` · 1024×1024 (square) · พื้นหลังโปร่งใส · สไตล์ S1
+
+```text
+Cute hand-drawn doodle illustration. Thick, slightly uneven black outlines (about 6 px at 1024 px). Flat pastel fills only from this palette: cream #FFF4D6, mint #BDE7D2, sky blue #AFD8F2, peach #F9C7A8, lilac #D8C8F0, butter yellow #FBE38E, coral #F28B82, plus black for outlines. No gradients, no realistic shading, at most one flat darker shadow shape per object. Friendly, simple, rounded shapes. People have simple round faces with dot eyes and simple mitten-like hands.
+
+Subject: Two hands washing with soap bubbles.
+
+Canvas: 1024×1024 (square). Exactly ONE subject (or exactly the people listed), centred, the whole subject fully visible with an empty margin of at least 10% on every side. Transparent background (PNG with alpha channel). If transparency is not possible, use a plain pure white #FFFFFF background. Do NOT draw: any text, letters, numbers, words, Thai or English characters, logos, brand marks, watermark, signature, frame, border, ground line, or a checkerboard pattern.
+```
+
+
+---
+
+### 22-06 · หน้ากากอนามัย
+
+ไฟล์: `s1-health-mask.png` · 1024×1024 (square) · พื้นหลังโปร่งใส · สไตล์ S1
+
+```text
+Cute hand-drawn doodle illustration. Thick, slightly uneven black outlines (about 6 px at 1024 px). Flat pastel fills only from this palette: cream #FFF4D6, mint #BDE7D2, sky blue #AFD8F2, peach #F9C7A8, lilac #D8C8F0, butter yellow #FBE38E, coral #F28B82, plus black for outlines. No gradients, no realistic shading, at most one flat darker shadow shape per object. Friendly, simple, rounded shapes. People have simple round faces with dot eyes and simple mitten-like hands.
+
+Subject: A surgical face mask.
+
+Canvas: 1024×1024 (square). Exactly ONE subject (or exactly the people listed), centred, the whole subject fully visible with an empty margin of at least 10% on every side. Transparent background (PNG with alpha channel). If transparency is not possible, use a plain pure white #FFFFFF background. Do NOT draw: any text, letters, numbers, words, Thai or English characters, logos, brand marks, watermark, signature, frame, border, ground line, or a checkerboard pattern.
+```
+
+
+---
+
+### 22-07 · อาหารสุขภาพ
+
+ไฟล์: `s1-health-healthy-plate.png` · 1024×1024 (square) · พื้นหลังโปร่งใส · สไตล์ S1
+
+```text
+Cute hand-drawn doodle illustration. Thick, slightly uneven black outlines (about 6 px at 1024 px). Flat pastel fills only from this palette: cream #FFF4D6, mint #BDE7D2, sky blue #AFD8F2, peach #F9C7A8, lilac #D8C8F0, butter yellow #FBE38E, coral #F28B82, plus black for outlines. No gradients, no realistic shading, at most one flat darker shadow shape per object. Friendly, simple, rounded shapes. People have simple round faces with dot eyes and simple mitten-like hands.
+
+Subject: A plate with vegetables, rice and fish.
+
+Canvas: 1024×1024 (square). Exactly ONE subject (or exactly the people listed), centred, the whole subject fully visible with an empty margin of at least 10% on every side. Transparent background (PNG with alpha channel). If transparency is not possible, use a plain pure white #FFFFFF background. Do NOT draw: any text, letters, numbers, words, Thai or English characters, logos, brand marks, watermark, signature, frame, border, ground line, or a checkerboard pattern.
+```
+
+
+---
+
+### 22-08 · หัวใจเต้น
+
+ไฟล์: `s1-health-heartbeat.png` · 1024×1024 (square) · พื้นหลังโปร่งใส · สไตล์ S1
+
+```text
+Cute hand-drawn doodle illustration. Thick, slightly uneven black outlines (about 6 px at 1024 px). Flat pastel fills only from this palette: cream #FFF4D6, mint #BDE7D2, sky blue #AFD8F2, peach #F9C7A8, lilac #D8C8F0, butter yellow #FBE38E, coral #F28B82, plus black for outlines. No gradients, no realistic shading, at most one flat darker shadow shape per object. Friendly, simple, rounded shapes. People have simple round faces with dot eyes and simple mitten-like hands.
+
+Subject: A heart with a heartbeat line.
+
+Canvas: 1024×1024 (square). Exactly ONE subject (or exactly the people listed), centred, the whole subject fully visible with an empty margin of at least 10% on every side. Transparent background (PNG with alpha channel). If transparency is not possible, use a plain pure white #FFFFFF background. Do NOT draw: any text, letters, numbers, words, Thai or English characters, logos, brand marks, watermark, signature, frame, border, ground line, or a checkerboard pattern.
+```

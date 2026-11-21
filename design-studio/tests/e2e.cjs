@@ -81,6 +81,15 @@ async function selectIndex(i) {
   await ev((i) => { const c = __lai.canvas; const o = c.getObjects().at(i); c.setActiveObject(o); c.requestRenderAll(); }, i);
   await wait(80);
 }
+/** Reload the page and wait until the editor is really ready (fixed waits are flaky when the machine is busy). */
+async function reloadEditor() {
+  const t0 = Date.now();
+  await page.reload();
+  await page.waitForSelector('.canvas-container');
+  await page.waitForFunction(() => window.__lai && window.__lai.canvas, null, { timeout: 30000 });
+  await page.waitForTimeout(300);
+  return Date.now() - t0;
+}
 async function clearPage() {
   await ev(() => { const c = __lai.canvas; c.discardActiveObject(); c.remove(...c.getObjects()); c.backgroundColor = '#ffffff'; c.backgroundImage = null; c.requestRenderAll(); __lai.commit(); });
 }
@@ -148,6 +157,19 @@ function meanDiff(a, b) {
   browser = await chromium.launch(proxy ? { proxy: { server: proxy, bypass: 'localhost,127.0.0.1' } } : {});
   ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true, acceptDownloads: true });
   page = await ctx.newPage();
+  // our own illustration library (public/illustrations/manifest.json) – a small fake one for the tests
+  const ILL_A = path.join(OUT, 'ill-a.png'), ILL_S = path.join(OUT, 'ill-scene.png');
+  makePNG(300, 300, ILL_A); makePNG(600, 400, ILL_S);
+  const illManifest = { items: [
+    { id: 's1-students-boy-waving', src: 'ill-a.png', thumb: 'ill-a.png', w: 300, h: 300, kind: 'sticker', cat: 'students', catTh: 'นักเรียน', th: 'นักเรียนชายโบกมือ', keywords: 'นักเรียน', added: '2026-11-21' },
+    { id: 's1-students-girl-reading', src: 'ill-a.png', thumb: 'ill-a.png', w: 300, h: 300, kind: 'sticker', cat: 'students', catTh: 'นักเรียน', th: 'นักเรียนหญิงอ่านหนังสือ', keywords: 'นักเรียน', added: '2026-11-21' },
+    { id: 's1-slide-bg-hills', src: 'ill-scene.png', thumb: 'ill-scene.png', w: 600, h: 400, kind: 'scene', cat: 'slide-bg', catTh: 'ฉากสไลด์', th: 'ทุ่งหญ้าและภูเขา', keywords: 'ฉาก', added: '2026-11-21' },
+  ] };
+  await ctx.route('**/illustrations/**', (route) => {
+    const u = route.request().url();
+    if (u.endsWith('manifest.json')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(illManifest) });
+    return route.fulfill({ contentType: 'image/png', body: fs.readFileSync(u.includes('scene') ? ILL_S : ILL_A) });
+  });
   page.setDefaultTimeout(10000);
   page.on('pageerror', (e) => pageErrors.push(e.message));
   if (process.env.DBG) page.on('console', (m) => { if (m.text().startsWith('DBG')) console.log('      ', m.text().slice(0, 300)); });
@@ -519,6 +541,18 @@ function meanDiff(a, b) {
     await page.click('[data-el-results] .el >> nth=0');
     await page.waitForFunction(() => __lai.canvas.getActiveObject()?.graphic?.c === 'social');
     await page.fill('[data-el-search]', '');
+    // our own (ChatGPT-made, checked and approved) illustrations
+    assert(await page.$('.el-row-head b >> text=ภาพประกอบของเรา'), 'our illustrations row');
+    await page.click('[data-act="gfx:il|s1-students-boy-waving"] >> nth=0');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.graphic?.c === 'ill');
+    await page.click('[data-el-view="ill-scenes"]');
+    await page.click('.el-view [data-act="gfx:il|s1-slide-bg-hills"]');
+    await page.waitForFunction(() => !!__lai.canvas.backgroundImage);
+    await page.click('.el-view-head [data-el-view=""]');
+    await page.fill('[data-el-search]', 'นักเรียน');
+    assert((await page.$$('[data-el-results] [data-act^="gfx:il|"]')).length === 2, 'search our illustrations');
+    await page.fill('[data-el-search]', '');
+    await ev(() => { __lai.canvas.backgroundImage = null; __lai.commit(); });
     // recently used row
     await panel('text'); await panel('elements');
     await page.waitForSelector('.col-card');
@@ -528,7 +562,7 @@ function meanDiff(a, b) {
     await ev(() => __lai.loadPage(__lai.cur));
     await wait(800);
     const kinds = await ev(() => __lai.canvas.getObjects().map((x) => x.type + (x.graphic ? '*' : '')).join());
-    assert(kinds === 'path,path,image*,group*,path*', kinds);
+    assert(kinds === 'path,path,image*,group*,path*,image*', kinds);
     const png = await exportAs('png', { pages: 'cur' });
     assert(isPNG(png) && png.length > 20000, 'png export');
     await clearPage();
@@ -1221,9 +1255,7 @@ function meanDiff(a, b) {
     assert((await page.$$('.up-grid.logos .up')).length === 0, 'logo deleted');
     // colours/fonts survive a full reload of the app
     await ev(() => __lai.saveNow && __lai.saveNow());
-    await page.reload();
-    await page.waitForSelector('.canvas-container');
-    await wait(600);
+    console.log(`      (โหลดตัวแก้ไขใหม่ใช้เวลา ${await reloadEditor()} ms)`);
     await panel('brand');
     assert((await page.$eval('[data-brand-font="heading"]', (s) => s.value)) === 'Mitr', 'fonts after reload');
     assert((await page.$$('[data-brand-colors] [data-act="brand-color:#123456"]')).length === 1, 'colours after reload');
@@ -1891,9 +1923,7 @@ function meanDiff(a, b) {
     await page.press('[data-name]', 'Enter');
     await ev(() => __lai.saveNow());
     const before = await ev(() => [__lai.design.pages.length, __lai.canvas.getObjects().length]);
-    await page.reload();
-    await page.waitForSelector('.canvas-container');
-    await wait(800);
+    console.log(`      (โหลดตัวแก้ไขใหม่ใช้เวลา ${await reloadEditor()} ms)`);
     const after = await ev(() => [__lai.design.pages.length, __lai.canvas.getObjects().length, __lai.design.name]);
     assert(after[0] === before[0] && after[1] === before[1] && after[2] === 'งานทดสอบระบบ', `${before} vs ${after}`);
   });
@@ -2022,9 +2052,7 @@ function meanDiff(a, b) {
     assert((await ev(() => __lai.design.doc.header.text)) === 'แก้หัวกระดาษ', 'redo');
     // survives a reload
     await ev(() => __lai.saveNow());
-    await page.reload();
-    await page.waitForSelector('.canvas-container');
-    await wait(800);
+    console.log(`      (โหลดตัวแก้ไขใหม่ใช้เวลา ${await reloadEditor()} ms)`);
     assert((await ev(() => __lai.design.doc && __lai.design.doc.header.text)) === 'แก้หัวกระดาษ', 'after reload');
     assert((await roles()).includes('watermark'), 'deco after reload');
     // open from the text panel, clear everything

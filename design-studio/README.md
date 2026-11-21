@@ -88,3 +88,9 @@ npm run build && npm test
 
 สร้างไฟล์ `src/graphics-data.js` ใหม่ได้ด้วย `node tools/build-graphics.mjs`
 
+## ภาพประกอบของเราเอง (สร้างด้วย ChatGPT)
+
+แผนและขั้นตอนอยู่ที่ [illustrations/PLAN.md](illustrations/PLAN.md) มีคำสั่ง 302 ภาพ ใน 33 ชุดอยู่ใน `illustrations/batches/`
+ทุกภาพต้องผ่านการตรวจอัตโนมัติ (`npm run illus:check`) และการตรวจด้วยตาก่อนนำเข้า (`npm run illus:import`)
+ภาพที่นำเข้าแล้วจะขึ้นในแผงองค์ประกอบ ในแถว "ภาพประกอบของเรา" และ "ฉากพื้นหลังของเรา"
+

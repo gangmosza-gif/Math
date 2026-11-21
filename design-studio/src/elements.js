@@ -5,6 +5,13 @@ import { icon } from './icons.js';
 import { SHAPE_FAMILIES, makeFamilyShape, familyPreview } from './shapes2.js';
 
 let gfxPromise = null;
+let illPromise = null;
+const ILL_BASE = 'illustrations/';
+/** Our own illustrations (made with ChatGPT, checked and approved): public/illustrations/manifest.json. Empty when absent. */
+export const loadIllustrations = () => (illPromise ||= fetch(ILL_BASE + 'manifest.json').then((r) => (r.ok ? r.json() : { items: [] })).then((m) => m.items || []).catch(() => []));
+export const illURL = (it, thumb = false) => ILL_BASE + (thumb ? it.thumb : it.src);
+let ILL = [];
+export const setIllustrations = (items) => { ILL = items || []; };
 /** The graphics collections (a separate chunk, ~3 MB, fetched the first time the Elements panel opens). */
 export const loadGraphics = () => (gfxPromise ||= import('./graphics-data.js').then((m) => m.default));
 
@@ -27,6 +34,7 @@ const pushRecent = (id) => { try { localStorage.setItem(RKEY, JSON.stringify([id
 // ---------------------------------------------------------------- lookups
 export function findItem(gfx, id) {
   const [kind, a, b] = id.split('|');
+  if (kind === 'il') { const it = ILL.find((x) => x.id === a); return it ? { kind: 'ill', item: it } : null; }
   if (kind === 'sf') { const f = SHAPE_FAMILIES.find((x) => x.k === a); return f && f.items[+b] ? { kind: 'shape', fam: f, item: f.items[+b] } : null; }
   const col = gfx && gfx.find((c) => c.k === a);
   const it = col && col.items.find((x) => x[0] === b);
@@ -35,6 +43,7 @@ export function findItem(gfx, id) {
 const tile = (id, inner, title) => `<button class="el gfx" data-act="gfx:${esc(id)}" title="${esc(title)}">${inner}</button>`;
 const shapeTile = (f, i) => tile(`sf|${f.k}|${i}`, familyPreview(f.items[i]), `รูปทรง ${f.title} ${f.items[i].label}`);
 const gfxTile = (c, it) => tile(`g|${c.k}|${it[0]}`, graphicThumb(c, it), `${c.title} ${it[0].replace(/-/g, ' ')} ${it[4] || ''}`);
+const illTile = (it) => tile(`il|${it.id}`, `<img src="${illURL(it, true)}" alt="" loading="lazy">`, `ภาพประกอบ ${it.catTh} ${it.th} ${it.keywords || ''}`);
 const row = (title, view, tiles, n) => `<div class="el-row-head"><b>${esc(title)}</b>${view ? `<button class="link" data-el-view="${esc(view)}">ดูทั้งหมด${n ? ` (${n})` : ''}</button>` : ''}</div><div class="el-row">${tiles}</div>`;
 
 /** Top of the Elements panel: recents, shapes, collections, icons, social … (rows of 6 with "see all"). */
@@ -42,7 +51,13 @@ export function elementsHomeHTML(gfx) {
   const rec = recents().map((id) => ({ id, f: findItem(gfx, id) })).filter((x) => x.f).slice(0, 8);
   const byKey = Object.fromEntries((gfx || []).map((c) => [c.k, c]));
   const take = (k, n = 6) => (byKey[k] ? byKey[k].items.slice(0, n).map((it) => gfxTile(byKey[k], it)).join('') : '');
-  const recentTiles = rec.map(({ f }) => (f.kind === 'shape' ? shapeTile(f.fam, f.fam.items.indexOf(f.item)) : gfxTile(f.col, f.item))).join('');
+  const recentTiles = rec.map(({ f }) => (f.kind === 'shape' ? shapeTile(f.fam, f.fam.items.indexOf(f.item)) : f.kind === 'ill' ? illTile(f.item) : gfxTile(f.col, f.item))).join('');
+  const stickers = ILL.filter((x) => x.kind === 'sticker'), scenes = ILL.filter((x) => x.kind === 'scene');
+  const illCats = [...new Set(stickers.map((x) => x.catTh))];
+  const ours = ILL.length ? `
+    ${stickers.length ? row('ภาพประกอบของเรา', 'ill:*', [...stickers].sort((a, b) => (b.added || '').localeCompare(a.added || '')).slice(0, 6).map(illTile).join(''), stickers.length) : ''}
+    ${scenes.length ? row('ฉากพื้นหลังของเรา', 'ill-scenes', scenes.slice(0, 3).map(illTile).join(''), scenes.length) : ''}
+    ${illCats.length > 1 ? `<div class="col-grid">${illCats.map((c) => { const l = stickers.filter((x) => x.catTh === c); return `<button class="col-card" data-el-view="ill:${esc(c)}"><span class="col-prev">${l.slice(0, 6).map((x) => `<img src="${illURL(x, true)}" alt="">`).join('')}</span><b>${esc(c)}</b><small>${l.length} ภาพ</small></button>`; }).join('')}</div>` : ''}` : '';
   const shapeRow = SHAPE_FAMILIES.map((f) => shapeTile(f, 0)).slice(0, 6).join('');
   const colCards = (gfx || []).filter((c) => !['3d', 'social', 'hand', 'kameleon', 'business'].includes(c.k) && !c.k.startsWith('tabler')).map((c) => `
     <button class="col-card" data-el-view="col:${c.k}" title="คอลเลกชัน ${esc(c.title)}">
@@ -50,6 +65,7 @@ export function elementsHomeHTML(gfx) {
       <b>${esc(c.title)}</b><small>${c.items.length} กราฟิก</small></button>`).join('');
   return `
     ${rec.length ? row('ใช้งานล่าสุด', '', recentTiles) : ''}
+    ${ours}
     ${row('รูปทรง', 'shapes', shapeRow, SHAPE_FAMILIES.reduce((a, f) => a + f.items.length, 0))}
     ${gfx ? `
       ${row('สติกเกอร์ 3 มิติ', 'col:3d', take('3d'), byKey['3d']?.items.length)}
@@ -71,6 +87,13 @@ export function elementsViewHTML(gfx, view) {
   if (view === 'icons') {
     return back('ไอคอน', '<small class="hint">เปลี่ยนสีได้</small>') + gfx.filter((c) => c.k.startsWith('tabler')).map((c) => `<div class="el-row-head"><b>${esc(c.title)}</b></div><div class="el-grid gfx-grid">${c.items.map((it) => gfxTile(c, it)).join('')}</div>`).join('');
   }
+  if (view === 'ill-scenes' || view.startsWith('ill:')) {
+    const cat = view.slice(4);
+    const list = view === 'ill-scenes' ? ILL.filter((x) => x.kind === 'scene') : ILL.filter((x) => x.kind === 'sticker' && (cat === '*' || x.catTh === cat));
+    return back(view === 'ill-scenes' ? 'ฉากพื้นหลังของเรา' : cat === '*' ? 'ภาพประกอบของเรา' : cat, `<small class="hint">${list.length} ภาพ</small>`)
+      + (view === 'ill-scenes' ? '<p class="hint">คลิกเพื่อตั้งเป็นพื้นหลังของหน้า</p>' : '')
+      + `<div class="el-grid gfx-grid ${view === 'ill-scenes' ? 'scenes' : 'big'}">${list.map(illTile).join('')}</div>`;
+  }
   const c = gfx.find((x) => 'col:' + x.k === view);
   if (!c) return back('ไม่พบ');
   return back(c.title, `<small class="hint">${c.items.length} กราฟิก</small>`) + `<div class="el-grid gfx-grid ${c.k === '3d' || c.k === 'hand' ? 'big' : ''}">${c.items.map((it) => gfxTile(c, it)).join('')}</div>
@@ -83,10 +106,11 @@ export function elementsSearchHTML(gfx, q) {
   const hit = (txt) => terms.every((t) => txt.includes(t));
   const shapes = SHAPE_FAMILIES.flatMap((f) => f.items.map((it, i) => ({ f, i, txt: `${f.title} ${it.label} รูปทรง`.toLowerCase() }))).filter((x) => hit(x.txt));
   const g = (gfx || []).flatMap((c) => c.items.map((it) => ({ c, it, txt: `${c.title} ${it[0].replace(/-/g, ' ')} ${it[4] || ''}`.toLowerCase() }))).filter((x) => hit(x.txt));
-  const n = shapes.length + g.length;
+  const il = ILL.filter((x) => hit(`ภาพประกอบ ${x.catTh} ${x.th} ${x.keywords || ''}`.toLowerCase()));
+  const n = shapes.length + g.length + il.length;
   if (!n) return '';
   return `<div class="el-row-head"><b>ผลการค้นหา</b><small class="hint">${n} รายการ</small></div>
-    <div class="el-grid gfx-grid" data-el-results>${[...shapes.slice(0, 40).map((x) => shapeTile(x.f, x.i)), ...g.slice(0, 160).map((x) => gfxTile(x.c, x.it))].join('')}</div>`;
+    <div class="el-grid gfx-grid" data-el-results>${[...il.slice(0, 40).map(illTile), ...shapes.slice(0, 40).map((x) => shapeTile(x.f, x.i)), ...g.slice(0, 160).map((x) => gfxTile(x.c, x.it))].join('')}</div>`;
 }
 
 /** Make the Fabric object for an element id. */
@@ -95,6 +119,15 @@ export async function makeElement(gfx, id, size) {
   if (!f) return null;
   pushRecent(id);
   if (f.kind === 'shape') return makeFamilyShape(f.item, size);
+  if (f.kind === 'ill') {
+    const it = f.item;
+    if (it.kind === 'scene') return { sceneURL: illURL(it) };
+    const img = await FabricImage.fromURL(illURL(it), { crossOrigin: 'anonymous' });
+    const k = size / Math.max(img.width, img.height);
+    img.set({ scaleX: k, scaleY: k, name: `ภาพประกอบ: ${it.th}` });
+    img.graphic = { c: 'ill', n: it.id };
+    return img;
+  }
   const { col, item } = f;
   const [name, , w, h] = item;
   if (col.kind === 'mono') {
