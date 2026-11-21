@@ -3,6 +3,10 @@ import { Editor, BLANK_PAGE } from './editor.js';
 import { PRESETS } from './presets.js';
 import { listDesigns, getDesign, saveDesign, deleteDesign, deleteVersionsOf, uid } from './storage.js';
 import { icon } from './icons.js';
+import { hostDownloadsReady } from './export.js';
+
+// as a claude.ai Artifact, get the platform's file-save ready early (no-op in a normal browser)
+hostDownloadsReady();
 import { esc, h, toast, modal, confirmDialog, promptDialog, popover, closePopover } from './ui.js';
 
 const app = document.getElementById('app');

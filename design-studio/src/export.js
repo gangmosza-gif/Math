@@ -154,7 +154,23 @@ export function dataURLToBlob(url) {
   return new Blob([arr], { type: mime });
 }
 
-export function downloadBlob(blob, filename) {
+// When the app runs as a claude.ai Artifact, the page cannot download directly: files are offered
+// through the platform's `downloads` capability (the viewer confirms). Elsewhere: a normal download.
+let hostDownloads;
+export function hostDownloadsReady() {
+  if (hostDownloads === undefined) {
+    const c = typeof window !== 'undefined' && window.claude;
+    hostDownloads = c && typeof c.use === 'function' ? Promise.resolve(c.use('downloads')).catch(() => null) : Promise.resolve(null);
+  }
+  return hostDownloads;
+}
+
+export async function downloadBlob(blob, filename) {
+  const host = await hostDownloadsReady();
+  if (host) {
+    try { await host.save({ filename, data: blob }); } catch (e) { if (e && e.code !== 'declined') console.warn('download', e); }
+    return;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
