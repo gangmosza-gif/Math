@@ -660,7 +660,8 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
   const wordDoc = new D.Document({
     title: design.name, creator: 'Lai Studio',
     styles: {
-      default: { document: { run: { font: font('Sarabun'), language: { value: 'th-TH', bidirectional: 'th-TH' } } } },
+      // text typed later in Word: Sarabun 16 pt, the usual size for Thai documents
+      default: { document: { run: { font: font('Sarabun'), size: 32, sizeComplexScript: 32, language: { value: 'th-TH', bidirectional: 'th-TH' } } } },
       // neutral heading styles: the look comes from each run, the styles give Word's navigation pane / table of contents the outline
       paragraphStyles: [1, 2].map((lv) => ({ id: `Heading${lv}`, name: `heading ${lv}`, basedOn: 'Normal', next: 'Normal', quickFormat: true, paragraph: { outlineLevel: lv - 1, spacing: { before: 0, after: 0 } }, run: { color: '000000' } })),
     },

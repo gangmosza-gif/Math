@@ -86,6 +86,11 @@ r.bold = True
 r.font.size = Pt(18)
 r.font.color.rgb = RGBColor(0x1D, 0x4E, 0xD8)
 thai_font(r)
+# Word's own size / bold buttons also set the complex-script (Thai) variants
+rpr = r._element.get_or_add_rPr()
+for tag, attrs in (('w:bCs', {}), ('w:szCs', {qn('w:val'): '36'})):
+    el = rpr.makeelement(qn(tag), attrs)
+    rpr.append(el)
 done['added'] = 'ย่อหน้าที่เพิ่มใหม่ใน Word'
 
 doc.save(dst)
