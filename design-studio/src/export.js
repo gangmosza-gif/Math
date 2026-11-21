@@ -3,6 +3,62 @@ import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
 import { ensureFonts, fontsInJSON, fontCssUrl, FONT_NAMES } from './fonts.js';
 import { buildCmykPdf } from './cmyk.js';
+import { util as fabricUtil, Point } from 'fabric';
+import sarabunURL from './assets/Sarabun-Regular.ttf?url';
+
+// ---------------------------------------------------------------- searchable PDF text layer
+let fontB64 = null;
+async function textLayerFont(pdf) {
+  if (!fontB64) {
+    const buf = new Uint8Array(await (await fetch(sarabunURL)).arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    fontB64 = btoa(bin);
+  }
+  pdf.addFileToVFS('LaiText.ttf', fontB64);
+  pdf.addFont('LaiText.ttf', 'LaiText', 'normal');
+}
+
+/**
+ * Invisible text over the page picture so the PDF can be searched, selected and copied
+ * (like an OCR'd scan). Visible rendering stays the exact picture, so Thai shaping is never at risk.
+ * f = PDF units per design pixel, (ox, oy) = where the page picture starts, ptPerUnit converts font sizes.
+ */
+async function addTextLayer(pdf, design, pageJSON, f, ox, oy, ptPerUnit) {
+  const sc = await renderPage(design, pageJSON);
+  const texts = [];
+  const walk = (objs) => objs.forEach((o) => {
+    if (!o.visible) return;
+    if (/text/i.test(o.type) && String(o.text || '').trim()) texts.push(o);
+    if (o.getObjects) walk(o.getObjects());
+  });
+  walk(sc.getObjects());
+  if (texts.length) {
+    pdf.setFont('LaiText', 'normal');
+    for (const o of texts) {
+      const m = o.calcTransformMatrix();
+      const dec = fabricUtil.qrDecompose(m);
+      const left = o._getLeftOffset(), top = o._getTopOffset();
+      let acc = 0;
+      o._textLines.forEach((chars, i) => {
+        // emoji / pictographs are not in the text font: leave them out of the search layer
+        const line = chars.join('').replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{FE0F}\u{200D}]/gu, ' ');
+        const hImpl = o.getHeightOfLineImpl ? o.getHeightOfLineImpl(i) : o.getHeightOfLine(i);
+        const baseline = top + acc + hImpl - (hImpl / o.lineHeight) * o._fontSizeFraction;
+        acc += o.getHeightOfLine(i);
+        if (!line.trim()) return;
+        const p = new Point(left + o._getLineLeftOffset(i), baseline).transform(m);
+        const fontPx = (o.getHeightOfLine(i) / (o.lineHeight * o._fontSizeMult)) * Math.abs(dec.scaleY);
+        const size = Math.max(1, fontPx * f * ptPerUnit);
+        pdf.setFontSize(size);
+        const measured = pdf.getTextWidth(line);
+        const target = o.getLineWidth(i) * Math.abs(dec.scaleX) * f;
+        pdf.text(line, ox + p.x * f, oy + p.y * f, { renderingMode: 'invisible', angle: -dec.angle, horizontalScale: measured > 0 ? target / measured : 1 });
+      });
+    }
+  }
+  sc.dispose();
+}
 
 /** Render one page (serialized JSON string) to an offscreen fabric canvas. */
 export async function renderPage(design, pageJSON, { transparent = false, forceBg = null, bleed = 0 } = {}) {
@@ -127,7 +183,7 @@ export async function exportDesign(design, opts) {
   }
 
   if (format === 'pdf' && opts.print && opts.cmyk) return exportCmykPDF(design, list, name, onProgress);
-  if (format === 'pdf' && opts.print) return exportPrintPDF(design, list, name, onProgress);
+  if (format === 'pdf' && opts.print) return exportPrintPDF(design, list, name, onProgress, opts.searchable !== false);
 
   if (format === 'pdf') {
     const mm = design.mm;
@@ -136,11 +192,13 @@ export async function exportDesign(design, opts) {
     const ph = mm ? mm[1] : design.height * 0.75;
     const orientation = pw > ph ? 'landscape' : 'portrait';
     const pdf = new jsPDF({ orientation, unit, format: [pw, ph], compress: true });
+    if (opts.searchable !== false) await textLayerFont(pdf);
     for (let k = 0; k < list.length; k++) {
       onProgress(k, list.length);
       if (k > 0) pdf.addPage([pw, ph], orientation);
       const url = await pageToDataURL(design, list[k].page.json, { format: 'jpeg', multiplier: scale, quality: 0.95 });
       pdf.addImage(url, 'JPEG', 0, 0, pw, ph, undefined, 'FAST');
+      if (opts.searchable !== false) await addTextLayer(pdf, design, list[k].page.json, pw / design.width, 0, 0, unit === 'mm' ? 72 / 25.4 : 1);
       const f = pw / design.width;
       for (const l of await pageLinks(design, list[k].page.json)) pdf.link(l.left * f, l.top * f, l.width * f, l.height * f, { url: l.url });
     }
@@ -195,7 +253,7 @@ export async function pageThumb(design, pageJSON, width = 240) {
 }
 
 /** Print-ready PDF: 300 dpi, 3 mm bleed and crop marks. */
-async function exportPrintPDF(design, list, name, onProgress) {
+async function exportPrintPDF(design, list, name, onProgress, searchable = true) {
   const pxPerMM = design.mm ? design.width / design.mm[0] : 96 / 25.4;
   const tw = design.mm ? design.mm[0] : design.width / pxPerMM;
   const th = design.mm ? design.mm[1] : design.height / pxPerMM;
@@ -203,6 +261,7 @@ async function exportPrintPDF(design, list, name, onProgress) {
   const pw = tw + 2 * (bleedMM + slugMM), ph = th + 2 * (bleedMM + slugMM);
   const orientation = pw > ph ? 'landscape' : 'portrait';
   const pdf = new jsPDF({ orientation, unit: 'mm', format: [pw, ph], compress: true });
+  if (searchable) await textLayerFont(pdf);
   const multiplier = Math.max(1, (300 / 25.4) / pxPerMM);
   for (let k = 0; k < list.length; k++) {
     onProgress(k, list.length);
@@ -210,6 +269,7 @@ async function exportPrintPDF(design, list, name, onProgress) {
     const url = await pageToDataURL(design, list[k].page.json, { format: 'jpeg', multiplier, quality: 0.95, bleed: Math.round(bleedMM * pxPerMM) });
     pdf.addImage(url, 'JPEG', slugMM, slugMM, tw + 2 * bleedMM, th + 2 * bleedMM, undefined, 'FAST');
     const f = tw / design.width, o = slugMM + bleedMM;
+    if (searchable) await addTextLayer(pdf, design, list[k].page.json, f, o, o, 72 / 25.4);
     for (const l of await pageLinks(design, list[k].page.json)) pdf.link(o + l.left * f, o + l.top * f, l.width * f, l.height * f, { url: l.url });
     // crop marks at the trim edges, drawn in the slug area
     pdf.setDrawColor(0);

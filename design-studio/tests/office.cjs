@@ -244,6 +244,19 @@ const SAMPLES = [
     const ref = await exportFile('pdf', { base });
     const W = 900, H = Math.round((900 * (await ev(() => __lai.H))) / (await ev(() => __lai.W)));
     const refImgs = renderPdf(ref, path.join(OUT, `${base}-ref`), W, H);
+    await step('[PDF] ไฟล์ PDF ค้นหา/คัดลอกข้อความได้ครบทุกจุด', async () => {
+      const missing = [];
+      expected.pptx.forEach((list, pi) => {
+        const txt = run('pdftotext', ['-raw', '-f', String(pi + 1), '-l', String(pi + 1), '-enc', 'UTF-8', ref, '-']);
+        const hay = norm(txt);
+        list.forEach((t) => {
+          t = t.replace(/^↻/, '').replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{FE0F}\u{200D}]/gu, '');
+          if (norm(t) && !hay.includes(norm(t))) missing.push(`หน้า ${pi + 1}: “${t}”`);
+        });
+      });
+      assert(!missing.length, 'ค้นหาไม่พบ: ' + missing.slice(0, 6).join(' | '));
+      return `${expected.pptx.flat().length} ข้อความ`;
+    });
     // native chart areas per page (scaled to the comparison size)
     const chartBoxes = await ev((W) => { const k = W / __lai.W; return __lai.design.pages.filter((p) => !p.hidden).map((p) => (JSON.parse(p.json).objects || []).filter((o) => o.smart?.type === 'chart' && ['bar', 'hbar', 'line', 'area', 'pie', 'donut', 'bar-group', 'bar-stack', 'bar-stack100', 'hbar-group', 'hbar-stack', 'line-multi', 'line-smooth', 'area-stack', 'radar'].includes(o.smart.chart)).map((o) => { const w = o.width * o.scaleX, h = o.height * o.scaleY; const cx = o.left + (o.originX === 'center' ? 0 : w / 2), cy = o.top + (o.originY === 'center' ? 0 : h / 2); return { x: (cx - w / 2) * k, y: (cy - h / 2) * k, w: w * k, h: h * k }; })); }, W);
     const row = { sample: S.title, pages: nPages };

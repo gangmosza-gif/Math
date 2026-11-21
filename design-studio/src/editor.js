@@ -2182,6 +2182,7 @@ export class Editor {
           <label data-opt="editable" class="toggle-row" hidden><input type="checkbox" data-editable checked> แก้ไขได้ (ข้อความ ตาราง กราฟ รูปทรง เป็นวัตถุจริง) — ถ้าไม่ติ๊ก แต่ละหน้าจะเป็นภาพเดียว</label>
           <label data-opt="transparent" class="toggle-row"><input type="checkbox" data-transparent> พื้นหลังโปร่งใส</label>
           <label data-opt="print" class="toggle-row"><input type="checkbox" data-print> PDF สำหรับโรงพิมพ์ (300 dpi + ระยะตัดตก 3 มม. + เครื่องหมายตัด)</label>
+          <label data-opt="searchable" class="toggle-row" hidden><input type="checkbox" data-searchable checked> ค้นหา/เลือก/คัดลอกข้อความในไฟล์ PDF ได้</label>
           <label data-opt="cmyk" class="toggle-row" hidden><input type="checkbox" data-cmyk> โหมดสี CMYK (สำหรับโรงพิมพ์ระบบออฟเซ็ต)</label>
           <label data-opt="pages">หน้า
             <select class="select" data-pages-sel>
@@ -2203,6 +2204,7 @@ export class Editor {
       el.querySelector('[data-opt="scale"]').hidden = f === 'svg' || f === 'json' || print;
       el.querySelector('[data-opt="print"]').hidden = f !== 'pdf';
       el.querySelector('[data-opt="cmyk"]').hidden = !print;
+      el.querySelector('[data-opt="searchable"]').hidden = f !== 'pdf' || (print && el.querySelector('[data-cmyk]').checked);
       el.querySelector('[data-opt="editable"]').hidden = f !== 'pptx';
       if (f === 'docx') el.querySelector('[data-opt="scale"]').hidden = true;
       el.querySelector('[data-opt="quality"]').hidden = !(f === 'jpg' || f === 'webp');
@@ -2249,6 +2251,7 @@ export class Editor {
           transparent: el.querySelector('[data-transparent]').checked,
           print: el.querySelector('[data-print]').checked,
           cmyk: el.querySelector('[data-cmyk]').checked,
+          searchable: el.querySelector('[data-searchable]').checked,
           editable: el.querySelector('[data-editable]').checked,
           onProgress: (i, total) => { go.textContent = total > 1 ? `กำลังสร้าง ${Math.min(i + 1, total)}/${total}…` : 'กำลังสร้าง…'; },
         });

@@ -105,6 +105,7 @@ async function exportAs(fmt, opts = {}) {
   if (opts.print) await page.check('[data-print]');
   if (opts.cmyk) await page.check('[data-cmyk]');
   if (opts.editable === false) await page.uncheck('[data-editable]');
+  if (opts.searchable === false) await page.uncheck('[data-searchable]');
   if (opts.pages) {
     await page.selectOption('[data-pages-sel]', opts.pages === 'cur' ? 'cur' : 'custom');
     if (opts.pages !== 'cur') await page.fill('[data-pages-custom]', opts.pages);
@@ -1669,6 +1670,31 @@ function meanDiff(a, b) {
     await page.click('[data-act="pop:link"]');
     await page.click('.popover [data-remove]');
     assert(!(await ev(() => __lai.canvas.getObjects().at(-1).link)), 'link removed');
+  });
+  await step('[D3] PDF ค้นหา/คัดลอกข้อความได้ (ไทย อังกฤษ ข้อความในกลุ่ม/ตาราง) โดยหน้าตาไม่เปลี่ยน', async () => {
+    await ev(async () => {
+      const L = __lai;
+      const t = await L.addText('body', { text: 'ทดสอบค้นหาภาษาไทย สระ ปู่ ฟ้า น้ำ', fontFamily: 'Sarabun', fontSize: 40, width: 800 });
+      t.set({ left: 100, top: 600, angle: 0 });
+      const r = await L.addText('body', { text: 'Rotated ข้อความเอียง', fontFamily: 'Kanit', fontSize: 36, width: 600 });
+      r.set({ left: 150, top: 800, angle: -15 });
+      await L.addSmart('table');
+      L.canvas.discardActiveObject();
+      L.commit();
+    });
+    const pdf = await exportAs('pdf', { pages: 'cur' });
+    const f = path.join(OUT, 'searchable.pdf');
+    fs.writeFileSync(f, pdf);
+    const txt = execFileSync('pdftotext', ['-raw', '-enc', 'UTF-8', f, '-']).toString().replace(/\s+/g, '');
+    for (const w of ['ทดสอบค้นหาภาษาไทยสระปู่ฟ้าน้ำ', 'Rotatedข้อความเอียง', 'หัวข้อ', 'รายการ1']) assert(txt.includes(w), 'missing ' + w + ' in: ' + txt.slice(0, 200));
+    assert(/LaiText|Sarabun/.test(execFileSync('pdffonts', [f]).toString()), 'font not embedded');
+    const plain = await exportAs('pdf', { pages: 'cur', searchable: false });
+    const d = meanDiff(pdfToRGB(pdf, 30), pdfToRGB(plain, 30));
+    assert(d < 0.5, 'text layer changed the look: ' + d.toFixed(2));
+    const pr = await exportAs('pdf', { pages: 'cur', print: true });
+    fs.writeFileSync(f, pr);
+    assert(execFileSync('pdftotext', ['-enc', 'UTF-8', f, '-']).toString().replace(/\s+/g, '').includes('ทดสอบค้นหาภาษาไทย'), 'print pdf not searchable');
+    await ev(() => { const c = __lai.canvas; c.remove(...c.getObjects().slice(-3)); __lai.commit(); });
   });
   await step('PDF หลายหน้า (เลือกหน้า 1,3)', async () => {
     const b = await exportAs('pdf', { pages: '1,3' });
