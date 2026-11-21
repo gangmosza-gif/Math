@@ -1056,11 +1056,14 @@ function meanDiff(a, b) {
     await wait(500);
     assert((await ev(() => __lai.canvas.getObjects().filter((o) => o.placeholder).length)) === 8, 'frames');
   });
-  await step('กรอบรูปทรงเรขาคณิต/ออร์แกนิก 26 แบบใหม่: ใส่รูปลงกรอบ (ลากจากแผง) ซูมและเลื่อนรูปในกรอบ เปลี่ยนรูปทรงกรอบ บันทึกและส่งออก', async () => {
+  await step('กรอบรูป 183 แบบ (เรขาคณิต ดาว ธรรมชาติ หัวใจ ป้าย ขอบกระดาษ A–Z 0–9 ก–ฮ): ใส่รูปลงกรอบ (ลากจากแผง) ซูมและเลื่อนรูปในกรอบ เปลี่ยนรูปทรงกรอบ บันทึกและส่งออก', async () => {
     await clearPage();
     await panel('elements');
-    const n = await page.$$eval('[data-act^="frame:"]', (e) => e.length);
-    assert(n >= 34, `frames ${n}`);
+    await page.click('[data-el-view="frames"]');
+    const n = await page.$$eval('.el-view [data-act^="frame:"]', (e) => e.length);
+    assert(n >= 180, `frames ${n}`);
+    const cats = await page.$$eval('.el-view .el-row-head b', (e) => e.map((x) => x.textContent));
+    for (const c of ['เรขาคณิต', 'ตัวอักษร A–Z', 'ตัวเลข 0–9', 'พยัญชนะไทย ก–ฮ', 'ขอบกระดาษ แสตมป์ พู่กัน', 'ตารางรูป (คอลลาจ)']) assert(cats.includes(c), 'category ' + c);
     // every new frame shape: clipped placeholder whose box follows the shape's proportions
     const shapes = await ev(async () => {
       const L = __lai;
@@ -1070,6 +1073,9 @@ function meanDiff(a, b) {
         await L.panelAction(b.dataset.act);
         const o = L.canvas.getActiveObject();
         out.push([o.mask, !!o.clipPath, o.placeholder, Math.round((o.getScaledWidth() / o.getScaledHeight()) * 100) / 100]);
+        L.canvas.discardActiveObject();
+        L.canvas.remove(o); // check one frame at a time (175 placeholders on one page is not a real use)
+        L.design.pages[L.cur].json = L.serialize();
       }
       return out;
     });
@@ -1079,7 +1085,7 @@ function meanDiff(a, b) {
     // drop a picture from the uploads panel onto a frame → it fills the frame, keeps size & shape
     await clearPage();
     await panel('elements');
-    await page.click(`[data-act^="frame:"][title="กรอบรูป สามเหลี่ยม"]`);
+    await page.click(`.el-view [data-act^="frame:"][title="กรอบรูป สามเหลี่ยม"]`);
     await page.waitForFunction(() => __lai.canvas.getActiveObject()?.mask === 'triangle');
     const before = await ev(() => { const o = __lai.canvas.getActiveObject(); return [Math.round(o.getScaledWidth()), Math.round(o.getScaledHeight())]; });
     await panel('uploads');
@@ -1120,7 +1126,37 @@ function meanDiff(a, b) {
     const png = await exportAs('png', { pages: 'cur' });
     assert(isPNG(png), 'png');
     await clearPage();
-    await panel('elements'); // leave the panel as the next steps expect
+    // drag a picture that is already on the page onto a frame: it goes inside, as ONE undo step
+    await panel('elements');
+    await page.click(`[data-act^="frame:"][title="กรอบรูป พยัญชนะ ก"]`);
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.mask === 'th-0');
+    await page.click(`[data-act^="frame:"][title="กรอบรูป ตัวอักษร A"]`);
+    await page.waitForFunction(() => __lai.canvas.getObjects().length === 2);
+    await ev(() => { const [a, b] = __lai.canvas.getObjects(); a.setPositionByOrigin({ x: __lai.W * 0.3, y: __lai.H * 0.3 }, 'center', 'center'); b.setPositionByOrigin({ x: __lai.W * 0.7, y: __lai.H * 0.3 }, 'center', 'center'); a.setCoords(); b.setCoords(); __lai.commit(); });
+    await ev(async (b64) => { await __lai.addImage('data:image/png;base64,' + b64, 'รูปทดสอบ'); const o = __lai.canvas.getActiveObject(); o.set({ scaleX: 0.3, scaleY: 0.3 }); o.setPositionByOrigin({ x: __lai.W * 0.5, y: __lai.H * 0.8 }, 'center', 'center'); o.setCoords(); __lai.commit(); }, fs.readFileSync(IMG).toString('base64'));
+    const pts = await ev(() => { const c = __lai.canvas, v = c.viewportTransform, r = c.upperCanvasEl.getBoundingClientRect(); const q = (pt) => ({ x: r.left + pt.x * v[0] + v[4], y: r.top + pt.y * v[3] + v[5] }); return [q(c.getObjects()[2].getCenterPoint()), q(c.getObjects()[0].getCenterPoint())]; });
+    await page.mouse.move(pts[0].x, pts[0].y);
+    await page.mouse.down();
+    await page.mouse.move(pts[1].x, pts[1].y, { steps: 12 });
+    assert(await ev(() => __lai._dropFrame === __lai.canvas.getObjects()[0]), 'frame highlighted while dragging');
+    await page.mouse.up();
+    await page.waitForFunction(() => __lai.canvas.getObjects().length === 2 && !__lai.canvas.getObjects().some((o) => o.placeholder && o.mask === 'th-0'));
+    const filled = await ev(() => { const o = __lai.canvas.getObjects().find((x) => x.mask === 'th-0'); return [o.frame, !!o.clipPath, o.placeholder]; });
+    assert(filled[0] === true && filled[1] && !filled[2], `filled ${filled}`);
+    await page.keyboard.press('Control+z'); await wait(400);
+    // ONE undo step: the picture is back on the page and the frame is empty again
+    const u = await ev(() => __lai.canvas.getObjects().map((o) => (o.placeholder ? 'empty:' + o.mask : o.mask ? 'filled:' + o.mask : 'picture')).join());
+    assert(u === 'empty:th-0,empty:abc-A,picture', `after one undo: ${u}`);
+    // a picture moved over a picture that is NOT a frame stays where it is
+    await clearPage();
+    await ev(async (b64) => { for (const x of [0.3, 0.7]) { await __lai.addImage('data:image/png;base64,' + b64, 'รูป'); const o = __lai.canvas.getActiveObject(); o.set({ scaleX: 0.4, scaleY: 0.4 }); o.setPositionByOrigin({ x: __lai.W * x, y: __lai.H / 2 }, 'center', 'center'); o.setCoords(); } __lai.commit(); }, fs.readFileSync(IMG).toString('base64'));
+    const q2 = await ev(() => { const c = __lai.canvas, v = c.viewportTransform, r = c.upperCanvasEl.getBoundingClientRect(); const q = (pt) => ({ x: r.left + pt.x * v[0] + v[4], y: r.top + pt.y * v[3] + v[5] }); return [q(c.getObjects()[1].getCenterPoint()), q(c.getObjects()[0].getCenterPoint())]; });
+    await page.mouse.move(q2[0].x, q2[0].y); await page.mouse.down(); await page.mouse.move(q2[1].x, q2[1].y, { steps: 8 }); await page.mouse.up();
+    await wait(300);
+    assert((await objCount()) === 2, 'ordinary pictures are not swallowed');
+    await clearPage();
+    await panel('elements');
+    if (await page.$('.el-view-head [data-el-view=""]')) await page.click('.el-view-head [data-el-view=""]'); // back to the main elements view
   });
   await step('ตารางรูป (กริด) 6 แบบ ช่องไม่ล้นหน้า', async () => {
     await clearPage();

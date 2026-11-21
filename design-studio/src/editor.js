@@ -19,7 +19,7 @@ import { fileToDataURL } from './imageutil.js';
 import { features, SMART_LABEL, BRAND_FONT_KINDS } from './features.js';
 import { rulers } from './rulers.js';
 import { FRAMES, GRIDS, MOCKUPS, CHART_TYPES } from './smart.js';
-import { FRAME_SHAPES, isFrameShape, frameClipPath, framePreview } from './frames.js';
+import { FRAME_SHAPES, FRAME_CATEGORIES, isFrameShape, frameClipPath, framePreview } from './frames.js';
 
 const CHART_ICON = { bar: '📊', 'bar-group': '📊', 'bar-stack': '▥', 'bar-stack100': '▥', hbar: '☰', 'hbar-group': '☰', 'hbar-stack': '☰', waterfall: '⛲', lollipop: '🍭',
   line: '📈', 'line-multi': '📈', 'line-smooth': '〰', step: '⌐', area: '◭', 'area-stack': '◭', pie: '◔', donut: '◎', halfdonut: '◠', polar: '✿', radial: '◉',
@@ -41,7 +41,7 @@ Object.assign(InteractiveFabricObject.ownDefaults, {
   padding: 2,
 });
 
-const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder', 'link', 'alt', 'autoPage', 'shapeText', 'autoToc', 'graphic'];
+const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder', 'link', 'alt', 'autoPage', 'shapeText', 'autoToc', 'graphic', 'frame'];
 export const BLANK_PAGE = (bg = '#ffffff') => JSON.stringify({ version: '6.9.1', objects: [], background: bg });
 
 const COLORS = [
@@ -229,12 +229,26 @@ export class Editor {
     c.on('selection:cleared', () => { if (this.cropLeft()) return; if (currentPopoverId() !== 'color-bg') closePopover(); sel(); });
     c.on('object:modified', (e) => {
       const t = e.target;
+      if (this._dropFrame && isImage(t) && e.action === 'drag') {
+        const f = this._dropFrame;
+        this.setDropFrame(null);
+        // swap once the drag has fully finished (removing the dragged picture mid-transform would end the
+        // transform a second time and record an extra undo step)
+        setTimeout(() => { this.canvas.remove(t); this.replaceImage(f, t.getSrc()); }, 0);
+        return;
+      }
+      if (this._dropFrame) this.setDropFrame(null);
       if (isText(t) && (t.scaleX !== 1 || t.scaleY !== 1)) this.normalizeTextScale(t);
       this.guides = null;
       this.snapTargets = null;
       this.commit();
     });
-    c.on('object:moving', (e) => { if (e.target.cropUI) return this.clampCrop(e.target, 'move'); this.snap(e.target, e.e); });
+    c.on('object:moving', (e) => {
+      if (e.target.cropUI) return this.clampCrop(e.target, 'move');
+      this.snap(e.target, e.e);
+      // dragging a picture over a frame: highlight it (dropped on release)
+      if (isImage(e.target) && !e.target.placeholder) this.setDropFrame(this.frameAt(this.canvas.getScenePoint(e.e), e.target));
+    });
     c.on('object:scaling', (e) => { if (e.target.cropUI) this.clampCrop(e.target, 'scale'); });
     c.on('object:rotating', (e) => {
       const t = e.target;
@@ -259,7 +273,7 @@ export class Editor {
       e.path.set({ name: this.drawSettings.mode === 'highlighter' ? 'ปากกาไฮไลต์' : 'ลายเส้น' });
       this.commit();
     });
-    c.on('after:render', ({ ctx }) => { this.drawDocDeco(ctx); this.drawMargins(ctx); this.drawUserGuides(ctx); this.drawGuides(ctx); });
+    c.on('after:render', ({ ctx }) => { this.drawDocDeco(ctx); this.drawDropTarget(ctx); this.drawMargins(ctx); this.drawUserGuides(ctx); this.drawGuides(ctx); });
     c.on('mouse:down', (e) => {
       if (e.e.button === 2) this.showContextMenu(e);
     });
@@ -944,11 +958,16 @@ export class Editor {
 
     // drag & drop images
     const ws = this.$('[data-ws]');
-    ws.addEventListener('dragover', (e) => { e.preventDefault(); ws.classList.add('drop'); });
-    ws.addEventListener('dragleave', () => ws.classList.remove('drop'));
+    ws.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      ws.classList.add('drop');
+      try { this.setDropFrame(this.imageAt(this.canvas.getScenePoint(e))); } catch { /* outside the canvas */ }
+    });
+    ws.addEventListener('dragleave', () => { ws.classList.remove('drop'); this.setDropFrame(null); });
     ws.addEventListener('drop', (e) => {
       e.preventDefault();
       ws.classList.remove('drop');
+      this.setDropFrame(null);
       const act = e.dataTransfer?.getData('application/x-lai-act');
       if (act) return this.dropAct(act, e);
       const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/'));
@@ -2225,6 +2244,19 @@ export class Editor {
       if (!gfx) loadGraphics().then((g) => { this._gfx = g; if (this.panel === 'elements') this.renderPanel(); }).catch((e) => console.error('graphics', e));
       if (!this._illLoaded) { this._illLoaded = true; loadIllustrations().then((items) => { setIllustrations(items); if (items.length && this.panel === 'elements') this.renderPanel(); }); }
       const view = this._elView || '';
+      if (view === 'frames') {
+        const byCat = (cat) => FRAMES.map((f, i) => [f, i]).filter(([f]) => (isFrameShape(f[1]) ? FRAME_SHAPES.find((x) => x.k === f[1]).cat : 'basic') === cat);
+        body.innerHTML = `<div class="el-view">
+          <div class="el-view-head"><button class="icon-btn" data-el-view="" title="กลับ">${icon('left', 20)}</button><b>กรอบรูป</b><small class="hint">${FRAMES.length} แบบ</small></div>
+          <p class="hint">คลิกเพื่อเพิ่มกรอบ แล้วลากรูป (จากแผงหรือบนหน้างาน) ไปปล่อยบนกรอบ รูปจะเข้าไปในกรอบเอง</p>
+          ${FRAME_CATEGORIES.map(([cat, title]) => { const l = byCat(cat); return l.length ? `<div class="el-row-head"><b>${esc(title)}</b><small class="hint">${l.length}</small></div><div class="el-grid frames">${l.map(([f, i]) => this.frameTile(f, i)).join('')}</div>` : ''; }).join('')}
+          <div class="el-row-head"><b>ตารางรูป (คอลลาจ)</b><small class="hint">${GRIDS.length}</small></div>
+          <div class="el-grid">${GRIDS.map(([l, cells], i) => `<button class="el" data-act="grid:${i}" title="กริด ${l}"><svg viewBox="0 0 60 60" width="100%" height="100%">${cells.map(([x, y, w, hh]) => `<rect x="${x * 52 + 5}" y="${y * 52 + 5}" width="${w * 52 - 2}" height="${hh * 52 - 2}" rx="2" fill="#cfc8ec"/>`).join('')}</svg></button>`).join('')}</div>
+        </div>`;
+        body.scrollTop = 0;
+        this.markDraggable(body);
+        return;
+      }
       if (view && gfx) {
         body.innerHTML = `<div class="el-view">${elementsViewHTML(gfx, view)}</div>`;
         body.scrollTop = 0;
@@ -2249,7 +2281,8 @@ export class Editor {
         <div class="sec-title">ม็อกอัป (ใส่รูปในอุปกรณ์)</div>
         <div class="smart-grid">${MOCKUPS.map(([k, ic, l]) => `<button class="smart-btn" data-act="smart:mockup-${k}" title="ม็อกอัป ${l}"><b>${ic}</b><span>${l}</span></button>`).join('')}</div>
         <div class="sec-title">กรอบรูป</div>
-        <div class="el-grid">${FRAMES.map(([l, m, r], i) => `<button class="el" data-act="frame:${i}" title="กรอบรูป ${l}">${isFrameShape(m) ? `<span class="frame-svg">${framePreview(m)}</span>` : `<span class="frame-prev ${m}" style="aspect-ratio:${r}"></span>`}</button>`).join('')}</div>
+        <div class="el-grid" data-frame-grid>${FRAMES.slice(0, 16).map((f, i) => this.frameTile(f, i)).join('')}</div>
+        <button class="btn sm full" data-el-view="frames">ดูกรอบรูปทั้งหมด ${FRAMES.length} แบบ (ตัวอักษร ตัวเลข พยัญชนะไทย ขอบฉีก …)</button>
         <div class="sec-title">ตารางรูป (กริด)</div>
         <div class="el-grid">${GRIDS.map(([l, cells], i) => `<button class="el" data-act="grid:${i}" title="กริด ${l}"><svg viewBox="0 0 60 60" width="100%" height="100%">${cells.map(([x, y, w, hh]) => `<rect x="${x * 52 + 5}" y="${y * 52 + 5}" width="${w * 52 - 2}" height="${hh * 52 - 2}" rx="2" fill="#cfc8ec"/>`).join('')}</svg></button>`).join('')}</div>
         <div class="sec-title">เส้น</div>
@@ -2262,7 +2295,8 @@ export class Editor {
       const runSearch = () => {
         const v = q.value.trim().toLowerCase();
         this._elQ = q.value;
-        body.querySelector('[data-el-results-box]').innerHTML = v ? elementsSearchHTML(this._gfx, v) : '';
+        const fr = v ? FRAMES.map((f, i) => [f, i]).filter(([f]) => `กรอบรูป ${f[0]}`.toLowerCase().includes(v)).slice(0, 24) : [];
+        body.querySelector('[data-el-results-box]').innerHTML = (fr.length ? `<div class="el-row-head"><b>กรอบรูป</b><small class="hint">${fr.length}</small></div><div class="el-grid frames">${fr.map(([f, i]) => this.frameTile(f, i)).join('')}</div>` : '') + (v ? elementsSearchHTML(this._gfx, v) : '');
         body.querySelector('[data-el-home]').hidden = !!v;
         this.markDraggable(body);
         body.querySelectorAll('.el, .smart-btn').forEach((b) => { b.hidden = !!v && !(b.title || '').toLowerCase().includes(v); });
@@ -2571,6 +2605,42 @@ export class Editor {
       case 'layer-lock': { const o = objAt(arg); if (o) { o.locked = !o.locked; this.applyLock(o); this.canvas.requestRenderAll(); this.commit(); } return; }
       default: return false;
     }
+  }
+
+  frameTile([l, m, r], i) {
+    return `<button class="el" data-act="frame:${i}" title="กรอบรูป ${l}">${isFrameShape(m) ? `<span class="frame-svg">${framePreview(m)}</span>` : `<span class="frame-prev ${m}" style="aspect-ratio:${r}"></span>`}</button>`;
+  }
+
+  /** A picture that acts as a frame: an empty placeholder, a shaped picture, or one that was put into a frame. */
+  isFrame(o) {
+    return isImage(o) && !o.cropUI && (o.placeholder || o.mask || o.frame);
+  }
+
+  frameAt(pt, exclude) {
+    return this.canvas.getObjects().slice().reverse().find((o) => o !== exclude && this.isFrame(o) && o.visible && !o.locked && o.containsPoint(pt));
+  }
+
+  /** Outline the frame a picture will be dropped into. */
+  drawDropTarget(ctx) {
+    const f = this._dropFrame;
+    if (!f || !f.canvas) return;
+    const b = f.getBoundingRect();
+    const v = this.canvas.viewportTransform;
+    ctx.save();
+    ctx.transform(...v);
+    ctx.fillStyle = 'rgba(124,92,255,0.18)';
+    ctx.strokeStyle = '#7c5cff';
+    ctx.lineWidth = 3 / v[0];
+    ctx.setLineDash([10 / v[0], 6 / v[0]]);
+    ctx.fillRect(b.left, b.top, b.width, b.height);
+    ctx.strokeRect(b.left, b.top, b.width, b.height);
+    ctx.restore();
+  }
+
+  setDropFrame(f) {
+    if (this._dropFrame === f) return;
+    this._dropFrame = f || null;
+    this.canvas.requestRenderAll();
   }
 
   /** The picture behind a panel action (for dropping it into a frame). */

@@ -380,6 +380,7 @@ export const features = {
     const w = ratio >= 1 ? s : s * ratio, h = ratio >= 1 ? s / ratio : s;
     this.coverCrop(img, w, h);
     img.set({ name: 'กรอบรูป ' + label, placeholder: true });
+    img.frame = true;
     this.applyMask(img, mask);
     this.addObject(img);
     return img;
@@ -422,7 +423,8 @@ export const features = {
       // target box = the old picture without its border; keep the border's visual thickness
       this.coverCrop(img, old.width * old.scaleX, old.height * old.scaleY);
       const sw = old.strokeWidth ? (old.strokeWidth * old.scaleX) / img.scaleX : 0;
-      img.set({ angle: old.angle, flipX: old.flipX, flipY: old.flipY, opacity: old.opacity, shadow: old.shadow, stroke: old.stroke, strokeWidth: sw, name: old.placeholder ? 'รูปภาพ' : old.name });
+      img.set({ angle: old.angle, flipX: old.flipX, flipY: old.flipY, opacity: old.opacity, shadow: old.shadow, stroke: old.stroke, strokeWidth: sw, name: old.placeholder ? 'รูปในกรอบ' : old.name });
+      if (old.placeholder || old.mask || old.frame) img.frame = true;
       this.applyMask(img, old.mask);
       const c = old.getCenterPoint();
       const idx = this.canvas.getObjects().indexOf(old);

@@ -651,3 +651,4 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 .mask-grid button .mask-svg { display: block; width: 26px; height: 26px; color: var(--accent); }
 .mask-grid button .mask-svg svg { width: 100%; height: 100%; }
 .crop-zoom { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); } .crop-zoom input { width: 110px; }
+.el-grid.frames { grid-template-columns: repeat(4, 1fr); }
