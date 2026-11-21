@@ -2563,6 +2563,10 @@ export class Editor {
             </select>
           </label>
           <label data-opt="quality" hidden>คุณภาพ <input type="range" min="40" max="100" value="92" data-quality><output>92</output></label>
+          <label data-opt="docxmode" hidden>รูปแบบไฟล์ Word <select class="input" data-docxmode>
+            <option value="flow" ${this.design.mm || hasDoc(this.design) ? 'selected' : ''}>เอกสาร / รายงาน: ข้อความไหลต่อกัน แก้ไขแบบ Word ปกติ</option>
+            <option value="layout" ${this.design.mm || hasDoc(this.design) ? '' : 'selected'}>ตรงตามงานออกแบบ: วางข้อความในกรอบตามตำแหน่งเดิม</option>
+          </select></label>
           <label data-opt="editable" class="toggle-row" hidden><input type="checkbox" data-editable checked> แก้ไขได้ (ข้อความ ตาราง กราฟ รูปทรง เป็นวัตถุจริง) — ถ้าไม่ติ๊ก แต่ละหน้าจะเป็นภาพเดียว</label>
           <label data-opt="transparent" class="toggle-row"><input type="checkbox" data-transparent> พื้นหลังโปร่งใส</label>
           <label data-opt="print" class="toggle-row"><input type="checkbox" data-print> PDF สำหรับโรงพิมพ์ (300 dpi + ระยะตัดตก 3 มม. + เครื่องหมายตัด)</label>
@@ -2590,6 +2594,7 @@ export class Editor {
       el.querySelector('[data-opt="cmyk"]').hidden = !print;
       el.querySelector('[data-opt="searchable"]').hidden = f !== 'pdf' || (print && el.querySelector('[data-cmyk]').checked);
       el.querySelector('[data-opt="editable"]').hidden = f !== 'pptx';
+      el.querySelector('[data-opt="docxmode"]').hidden = f !== 'docx';
       if (f === 'docx') el.querySelector('[data-opt="scale"]').hidden = true;
       el.querySelector('[data-opt="quality"]').hidden = !(f === 'jpg' || f === 'webp');
       el.querySelector('[data-opt="transparent"]').hidden = f !== 'png';
@@ -2637,6 +2642,7 @@ export class Editor {
           cmyk: el.querySelector('[data-cmyk]').checked,
           searchable: el.querySelector('[data-searchable]').checked,
           editable: el.querySelector('[data-editable]').checked,
+          docxMode: el.querySelector('[data-docxmode]').value,
           onProgress: (i, total) => { go.textContent = total > 1 ? `กำลังสร้าง ${Math.min(i + 1, total)}/${total}…` : 'กำลังสร้าง…'; },
         });
         m.close();

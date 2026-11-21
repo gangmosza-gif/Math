@@ -186,7 +186,7 @@ export async function exportDesign(design, opts) {
   }
   if (format === 'docx') {
     const { buildDocx } = await import('./office.js');
-    return downloadBlob(await buildDocx(design, list.map((x) => x.page), onProgress), `${name}.docx`);
+    return downloadBlob(await buildDocx(design, list.map((x) => x.page), onProgress, { mode: opts.docxMode || 'layout' }), `${name}.docx`);
   }
   if (format === 'pptx') {
     const { default: PptxGenJS } = await import('pptxgenjs');

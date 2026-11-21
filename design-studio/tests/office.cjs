@@ -124,6 +124,8 @@ const SAMPLES = [
     await page.click('[data-act="export"]');
     await page.click(`.fmt:has(input[value="${fmt}"])`);
     if (opts.editable === false) await page.uncheck('[data-editable]');
+    // this suite measures how exactly the design is kept: Word in 'layout' mode (text frames at their exact places)
+    if (fmt === 'docx') await page.selectOption('[data-docxmode]', 'layout');
     const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 120000 }), page.click('[data-go]')]);
     const f = path.join(OUT, `${opts.base}.${fmt === 'pdf' ? 'ref.pdf' : fmt}`);
     await dl.saveAs(f);

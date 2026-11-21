@@ -208,6 +208,10 @@ const VARIANTS = [
   const exportFile = async (fmt, base) => {
     await page.click('[data-act="export"]');
     await page.click(`.fmt:has(input[value="${fmt}"])`);
+    if (fmt === 'docx') {
+      // documents default to the flowing Word layout
+      assert((await page.$eval('[data-docxmode]', (s) => s.value)) === 'flow', 'flow is not the default for documents');
+    }
     const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 120000 }), page.click('[data-go]')]);
     const f = path.join(OUT, `${base}.${fmt === 'pdf' ? 'ref.pdf' : fmt}`);
     await dl.saveAs(f);
@@ -329,6 +333,28 @@ const VARIANTS = [
       assert(m[0].includes(`w:color="${doc.border.color.slice(1).toUpperCase()}"`), 'border colour');
       return `${m.length} หน้า × 4 ด้าน`;
     });
+    await step('[โครงสร้าง Word] เป็นเอกสาร Word ปกติ: ไม่มีกล่องข้อความ ย่อหน้าไหลต่อกันตามลำดับการอ่าน ตารางอยู่ในเนื้อความ', async () => {
+      assert(!/w:framePr/.test(documentXml), 'text frames found');
+      assert(!/w:tblpPr/.test(documentXml), 'floating table found');
+      const body = textOf(documentXml);
+      const order = ['รายงานประจำปี', 'ประจำปีงบประมาณ2569', 'บทที่1บทนำ', '1.1ที่มาและความสำคัญ', 'โครงการนี้', '1.2วัตถุประสงค์', 'เพื่อพัฒนาผู้เรียน', 'บทที่2ผลการศึกษา', 'ผลการศึกษาพบว่า', 'หัวข้อ', 'รายการ1'];
+      const pos = order.map((t) => body.indexOf(norm(t)));
+      assert(pos.every((p, i) => p >= 0 && (i === 0 || p > pos[i - 1])), `reading order ${order.map((t, i) => t + ':' + pos[i]).join(' ')}`);
+      const bullets = (documentXml.match(/<w:numPr>/g) || []).length;
+      assert(bullets === 2 && !body.includes('•เพื่อ'), `bullet list ${bullets}`);
+      return 'ไม่มีกรอบข้อความ, ลำดับถูก, รายการเป็นบูลเล็ตของ Word';
+    });
+    await step('[อ่านแบบง่าย] โปรแกรมอ่านไฟล์ Word ที่ไม่สนตำแหน่ง (pandoc) ได้รายงานเรียงถูก หัวข้อ รายการ และตารางครบ', async () => {
+      let md;
+      try { md = run('pandoc', [docx, '-t', 'markdown']); } catch { return 'ข้าม: ไม่มี pandoc ในเครื่อง'; }
+      const lines = md.split('\n');
+      const at = (re) => lines.findIndex((l) => re.test(l));
+      const seq = [/^# .*บทที่ 1 บทนำ/, /^## .*1\.1 ที่มาและความสำคัญ/, /สำคัญมาก/, /^## .*1\.2 วัตถุประสงค์/, /^-\s+เพื่อพัฒนาผู้เรียน/, /^-\s+เพื่อปรับปรุงหลักสูตร/, /^# .*บทที่ 2 ผลการศึกษา/, /^ผลการศึกษาพบว่า/, /หัวข้อ.*ค่า A.*ค่า B/, /รายการ 3\s+12\s+30/];
+      const pos = seq.map(at);
+      assert(pos.every((p, i) => p >= 0 && (i === 0 || p > pos[i - 1])), 'order/structure: ' + seq.map((r, i) => `${r.source}:${pos[i]}`).join(' '));
+      fs.writeFileSync(path.join(OUT, `${V.key}.md`), md);
+      return 'หัวข้อ # / ##, รายการ -, ตาราง และลำดับถูกต้อง';
+    });
     await step('[โครงสร้าง Word] หัวข้อเป็นสไตล์ Heading 1 / Heading 2 (แสดงในบานหน้าต่างนำทางและสร้างสารบัญได้)', async () => {
       const h1 = (documentXml.match(/<w:pStyle w:val="Heading1"\/>/g) || []).length;
       const h2 = (documentXml.match(/<w:pStyle w:val="Heading2"\/>/g) || []).length;
@@ -389,8 +415,13 @@ const VARIANTS = [
       else assert(vals.every((v) => v < 0.05), `unexpected border ${vals.map((v) => v.toFixed(2))}`);
       return 'เส้นขอบครอบคลุม: ' + vals.map((v) => (v * 100).toFixed(0) + '%').join(', ');
     });
-    await step('[LibreOffice] หน้าตาเหมือนต้นฉบับ (เทียบภาพทีละหน้า ไม่นับบริเวณลายน้ำ)', async () => {
+    await step('[LibreOffice] หน้าตาเหมือนต้นฉบับ (เทียบภาพทีละหน้า ไม่นับบริเวณลายน้ำและเส้นขอบที่ตรวจแยกแล้ว)', async () => {
       const mask = wm ? [{ x: W * 0.12, y: H * 0.2, w: W * 0.76, h: H * 0.6 }] : [];
+      if (bd) {
+        // the border line itself is measured by the border check; programs draw its thickness a little differently
+        const ip = (doc.border.inset / (info.W > info.H ? 297 : 210)) * W, b = 7;
+        mask.push({ x: 0, y: ip - b, w: W, h: 2 * b }, { x: 0, y: H - ip - b, w: W, h: 2 * b }, { x: ip - b, y: 0, w: 2 * b, h: H }, { x: W - ip - b, y: 0, w: 2 * b, h: H });
+      }
       const out = [];
       for (let i = 0; i < N; i++) {
         const a = readPPM(refImgs[i]), b = readPPM(loImgs[i]);
@@ -433,6 +464,13 @@ const VARIANTS = [
       const all = [...Array(n2)].map((_, i) => rawText(pdf, i + 1)).join('');
       for (const t of [changes.heading, 'แก้ในตาราง', changes.added]) assert(all.includes(norm(t)), `missing edit "${t}"`);
       assert(rawText(pdf, n2).includes(norm(changes.added)), 'new paragraph not on the new page');
+      // the longer heading wraps and pushes the following text down (no overlap)
+      const ws = words(pdf, 2);
+      const head = ws.filter((w) => /Word\)|\(แก้ไข|ใน/.test(w.t) && w.y < 300);
+      const next = ws.find((w) => w.t === '1.1');
+      // (word boxes of a big heading are taller than its line spacing, so compare where the lines start)
+      const lastLine = Math.max(...head.map((w) => w.y));
+      assert(head.length && next && next.y > lastLine + 10, `overlap: last heading line starts ${lastLine} vs 1.1 starts ${next && next.y}`);
       run('pdftoppm', ['-r', '40', '-png', pdf, path.join(OUT, `${V.key}-edited`, 'p')]);
       return `${n2} หน้า${hasNum ? ', เลขหน้าหน้าสุดท้าย: ' + pageNumberText(doc.pageNum.fmt, n2 - 1, n2) : ''}`;
     });
@@ -455,7 +493,42 @@ const VARIANTS = [
     });
   }
 
-  group(`${VARIANTS.length + 1}. อื่น ๆ`);
+  group(`${VARIANTS.length + 1}. เทมเพลตเอกสาร A4 (ใบงาน, ประกาศ, เกียรติบัตร) ส่งออกแบบเอกสารไหลต่อกัน`);
+  {
+    await page.goto(URL);
+    await page.waitForSelector('.preset');
+    await page.click('.preset[data-preset="6"]');
+    await page.waitForFunction(() => window.__lai && document.querySelector('.canvas-container'));
+    for (const [i, t] of [2, 6, 3].entries()) {
+      if (i > 0) { await page.click('[data-act="page-add"]'); await page.waitForTimeout(300); }
+      await ev(async (k) => { await __lai.applyTemplate(k); }, t);
+      await page.waitForTimeout(400);
+    }
+    await page.waitForTimeout(1500);
+    const info = await ev(() => ({ W: __lai.W, H: __lai.H, texts: __lai.design.pages.map((p) => JSON.parse(p.json).objects.filter((o) => /text/i.test(o.type) && !((o.angle || 0) % 360) && !o.path && typeof o.fill === 'string').map((o) => o.text)) }));
+    const ref = await exportFile('pdf', 'templates');
+    const docx = await exportFile('docx', 'templates');
+    const xml = await (await JSZip.loadAsync(fs.readFileSync(docx))).file('word/document.xml').async('string');
+    const lo = toPdf(docx, path.join(OUT, 'templates-lo'));
+    await step('[เทมเพลต] ไม่มีกล่องข้อความ จำนวนหน้าเท่าเดิม ข้อความครบ', async () => {
+      assert(!/w:framePr/.test(xml), 'text frames found');
+      assert(pdfPages(lo) === 3, `pages ${pdfPages(lo)}`);
+      const missing = [];
+      info.texts.forEach((list, pi) => { const t = rawText(lo, pi + 1); list.forEach((x) => x.split('\n').forEach((l) => { if (l.trim() && !t.includes(norm(l))) missing.push(`p${pi + 1}: ${l}`); })); });
+      assert(!missing.length, 'missing ' + missing.slice(0, 4).join(' | '));
+    });
+    await step('[เทมเพลต] หน้าตาใกล้ต้นฉบับ (ภาพตกแต่งอยู่หลังข้อความ ข้อความไหลตามลำดับ)', async () => {
+      const W = 760, H = Math.round((W * info.H) / info.W);
+      const a = renderPdf(ref, path.join(OUT, 'templates-ref'), W, H), b = renderPdf(lo, path.join(OUT, 'templates-docx'), W, H);
+      const out = a.map((f, i) => { run('convert', [f, b[i], '+append', path.join(OUT, `compare-templates-${i + 1}.png`)]); return diff(readPPM(f), readPPM(b[i])); });
+      summary.push({ v: 'templates', title: 'เทมเพลต A4: ใบงาน / ประกาศ / เกียรติบัตร', diff: out.map((d) => `${d.mean.toFixed(1)}/${(d.changed * 100).toFixed(1)}%`).join(', ') });
+      const bad = out.map((d, i) => ({ ...d, i })).filter((d) => d.mean > 12 || d.changed > 0.08); // flowing text cannot be pixel-exact: looser than the layout mode (8)
+      assert(!bad.length, bad.map((d) => `p${d.i + 1} mean ${d.mean.toFixed(1)} changed ${(d.changed * 100).toFixed(1)}%`).join('; '));
+      return out.map((d) => d.mean.toFixed(1)).join(', ');
+    });
+  }
+
+  group(`${VARIANTS.length + 2}. อื่น ๆ`);
   await step('ไม่มี JavaScript error ระหว่างสร้างและส่งออกเอกสาร', async () => { assert(!errors.length, errors.slice(0, 3).join(' | ')); });
 
   await browser.close();

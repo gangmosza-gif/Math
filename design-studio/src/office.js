@@ -199,7 +199,7 @@ export async function pageModel(design, pageArg, mode = 'pptx') {
         // headings (same rule as the outline panel) become Word heading paragraphs
         const size = (o.fontSize || 0) * Math.abs(o.scaleY || 1);
         const level = o.autoPage || o.autoToc || o.decoRole ? 0 : size >= U * 0.08 ? 1 : size >= U * 0.055 ? 2 : 0;
-        items.push(textItem(o, { level, autoPage: o.autoPage || null }));
+        items.push(textItem(o, { level, autoPage: o.autoPage || null, listType: o.listType || null }));
         continue;
       }
       if (o.shapeText) {
@@ -420,7 +420,12 @@ function addPptxChart(pptx, slide, it, I, PT) {
 }
 
 // ================================================================ Word
-export async function buildDocx(design, pages, onProgress = () => {}) {
+/**
+ * Word export. mode 'flow' (documents/reports): ordinary paragraphs in reading order that flow and wrap like any
+ * Word document — headings, lists, inline tables/pictures, side-by-side items in an invisible table.
+ * mode 'layout' (designs): every text sits in a text frame at its exact place, so the page looks identical.
+ */
+export async function buildDocx(design, pages, onProgress = () => {}, { mode = 'layout' } = {}) {
   const D = await import('docx');
   const { ChartRun } = await import('docx/charts');
   const ipp = inchPerPx(design);
@@ -541,12 +546,14 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
     return { pageBorders: { display: D.PageBorderDisplay.ALL_PAGES, offsetFrom: D.PageBorderOffsetFrom.PAGE, zOrder: D.PageBorderZOrder.FRONT }, pageBorderTop: b, pageBorderBottom: b, pageBorderLeft: b, pageBorderRight: b };
   })() : undefined;
 
-  const tableOf = (it) => {
+  const tableOf = (it, floatIt = true, indentL = 0) => {
     const fszHalf = Math.round(PT(it.fontSize) * 2);
     const border = { style: D.BorderStyle.SINGLE, size: 6, color: it.border?.hex || 'CCCCCC' };
     return new D.Table({
       layout: D.TableLayoutType.FIXED, columnWidths: it.colW.map(TW), width: { size: TW(it.w), type: D.WidthType.DXA },
-      float: { horizontalAnchor: D.TableAnchorType.PAGE, verticalAnchor: D.TableAnchorType.PAGE, absoluteHorizontalPosition: TW(it.x), absoluteVerticalPosition: TW(it.y) },
+      ...(floatIt
+        ? { float: { horizontalAnchor: D.TableAnchorType.PAGE, verticalAnchor: D.TableAnchorType.PAGE, absoluteHorizontalPosition: TW(it.x), absoluteVerticalPosition: TW(it.y) } }
+        : { indent: { size: indentL, type: D.WidthType.DXA } }),
       rows: it.rows.map((r, ri) => new D.TableRow({
         height: { value: TW(it.rowH[ri]), rule: D.HeightRule.ATLEAST },
         children: r.map((c, ci) => {
@@ -568,7 +575,7 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
     const fontOpt = { name: it.fontFamily, color: it.color };
     const common = {
       title: it.title ? { text: it.title, font: { ...fontOpt, size: +(PT(it.fontSize) * 1.35).toFixed(1), bold: true } } : undefined,
-      font: fontOpt, transformation: { width: P96(it.w), height: P96(it.h) }, floating: floating(it.x, it.y, z, behind),
+      font: fontOpt, transformation: { width: P96(it.w), height: P96(it.h) }, ...(z === null ? {} : { floating: floating(it.x, it.y, z, behind) }),
       chartArea: { fill: 'none', border: 'none' },
     };
     if (it.chart === 'pie' || it.chart === 'donut') {
@@ -601,6 +608,158 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
     });
   };
 
+
+  // ------------------------------------------------------------------ flowing document
+  const listConfig = [
+    { reference: 'lai-bullet', levels: [{ level: 0, format: D.LevelFormat.BULLET, text: '•', alignment: D.AlignmentType.LEFT, style: { paragraph: { indent: { left: 360, hanging: 360 } } } }] },
+    { reference: 'lai-number', levels: [{ level: 0, format: D.LevelFormat.DECIMAL, text: '%1.', alignment: D.AlignmentType.LEFT, style: { paragraph: { indent: { left: 360, hanging: 360 } } } }] },
+  ];
+  let listInstance = 0;
+  const flowMargins = [];
+  const MM = (mm) => mm / 25.4 / ipp; // design px per mm
+  const LIST_RE = { bullet: /^\s*[•·▪◦‣\-–]\s+/, number: /^\s*\d+[.)]\s+/ };
+
+  /** One text item as flowing paragraphs: original line breaks are kept, wrapped lines are left to Word. */
+  const flowText = (it, { indentL, indentR, before }) => {
+    const first = firstStyle(it);
+    const pitch = Math.round(lineSpacingPt(it, first.fontSize || 20, PT) * 20);
+    const heading = it.level === 1 ? D.HeadingLevel.HEADING_1 : it.level === 2 ? D.HeadingLevel.HEADING_2 : undefined;
+    if (it.autoPage) {
+      const r0 = it.lines[0]?.runs[0];
+      return [new D.Paragraph({ alignment: align(it.align), indent: { left: indentL, right: indentR }, spacing: { before, after: 0, line: pitch, lineRule: D.LineRuleType.EXACT }, children: [runOf({ style: r0 ? r0.style : first, children: pageFieldParts(it.autoPage === 'nN' ? 'nN' : 'n') }, it)] })];
+    }
+    const paras = [];
+    for (const l of it.lines) {
+      if (!l.soft || !paras.length) paras.push([]);
+      paras[paras.length - 1].push(...l.runs.map((r) => ({ ...r })));
+    }
+    // list: Word numbering instead of typed bullets / numbers
+    const plain = paras.map((rs) => rs.map((r) => r.text).join(''));
+    let list = it.listType === 'bullet' || it.listType === 'number' ? it.listType : null;
+    if (!list && plain.length && plain.every((t) => !t.trim() || LIST_RE.bullet.test(t))) list = 'bullet';
+    if (!list && plain.length > 1 && plain.every((t) => !t.trim() || LIST_RE.number.test(t))) list = 'number';
+    const instance = list ? ++listInstance : 0;
+    const hang = Math.round(PT((first.fontSize || 20) * it.scale) * 0.6 * 20);
+    return paras.map((runs, i) => {
+      if (list && runs.length) {
+        const re = LIST_RE[list];
+        const k = runs.findIndex((r) => r.text.trim());
+        if (k >= 0) runs[k] = { ...runs[k], text: runs[k].text.replace(re, '') };
+      }
+      let children = runs.filter((r) => r.text).map((r) => runOf(r, it));
+      if (!children.length) children = [new D.TextRun({ text: '', font: font(first.fontFamily), size: Math.round(PT((first.fontSize || 20) * it.scale) * 2) })];
+      if (it.link) children = [new D.ExternalHyperlink({ link: it.link, children })];
+      return new D.Paragraph({
+        heading, alignment: align(it.align), children,
+        indent: list ? { left: indentL + hang, hanging: hang, right: indentR } : { left: indentL, right: indentR },
+        ...(list ? { numbering: { reference: `lai-${list}`, level: 0, instance } } : {}),
+        spacing: { before: i === 0 ? before : 0, after: 0, line: pitch, lineRule: D.LineRuleType.EXACT },
+        keepNext: !!heading,
+      });
+    });
+  };
+  const flowItem = (it, ctx) => {
+    if (it.kind === 'text') return flowText(it, ctx);
+    if (it.kind === 'table') {
+      const spacer = ctx.before > 40 ? [new D.Paragraph({ spacing: { before: 0, after: 0, line: Math.max(20, ctx.before), lineRule: D.LineRuleType.EXACT }, children: [] })] : [];
+      return [...spacer, tableOf(it, false, ctx.indentL)];
+    }
+    const run = it.kind === 'chart'
+      ? chartOf(it, null)
+      : new D.ImageRun({ type: 'png', data: dataOf(it.data), transformation: { width: P96(it.w), height: P96(it.h) }, altText: { name: it.alt || 'ภาพ', description: it.alt || '', title: it.alt || '' } });
+    return [new D.Paragraph({ indent: { left: ctx.indentL }, spacing: { before: ctx.before, after: 0 }, children: [run] })];
+  };
+
+  /** A page as flowing content. Pictures that sit behind text stay floating behind it (decoration). */
+  const flowPage = (model, anchors, nextZ, n) => {
+    const W = design.width, H = design.height;
+    const area = (a) => a.w * a.h;
+    const inter = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+    const isTextish = (t) => t.kind === 'text' || t.kind === 'table';
+    const deco = [], items = [];
+    // content reaching into the footer zone cannot flow (Word would push it to a new page): it stays pinned to the page
+    const footZone = doc ? H - MM(doc.edge + bandMm('footer') + 1) : H - MM(3);
+    const pinned = [];
+    for (const it of model.items) {
+      const behindText = (it.kind === 'image') && (area(it) > W * H * 0.5 || model.items.some((t) => t !== it && isTextish(t) && inter(t, it) > area(t) * 0.5));
+      if (behindText) deco.push(it);
+      else if (it.y + it.h > footZone && it.y > H * 0.5) pinned.push(it);
+      else items.push(it);
+    }
+    const pinnedOut = [];
+    for (const it of pinned) {
+      if (it.kind === 'image') anchors.push(new D.ImageRun({ type: 'png', data: dataOf(it.data), transformation: { width: P96(it.w), height: P96(it.h) }, floating: floating(it.x, it.y, nextZ(), false), altText: { name: it.alt || 'ภาพ', description: it.alt || '', title: it.alt || '' } }));
+      else if (it.kind === 'chart') anchors.push(chartOf(it, nextZ(), false));
+      else if (it.kind === 'text') pinnedOut.push(...textParagraphs(it));
+      else if (it.kind === 'table') pinnedOut.push(tableOf(it));
+    }
+    for (const it of deco) anchors.push(new D.ImageRun({ type: 'png', data: dataOf(it.data), transformation: { width: P96(it.w), height: P96(it.h) }, floating: floating(it.x, it.y, nextZ(), true), altText: { name: it.alt || 'ภาพตกแต่ง', description: it.alt || '', title: it.alt || '' } }));
+    // margins of this page from where its content sits (documents keep 10–40 mm)
+    const xs = items.map((t) => t.x), xe = items.map((t) => t.x + t.w), ye = items.map((t) => t.y + t.h);
+    const clampMm = (v, lo, hi) => Math.max(MM(lo), Math.min(MM(hi), v));
+    const Lp = doc ? Math.max(MM(sideMm), Math.min(...xs, MM(40))) : clampMm(items.length ? Math.min(...xs) : MM(20), 10, 40);
+    const Rp = doc ? Math.max(MM(sideMm), Math.min(W - Math.max(...xe, 0), MM(40))) : clampMm(items.length ? W - Math.max(...xe) : MM(20), 10, 40);
+    // the body starts at the first content line (Word moves it below a taller header by itself)
+    const firstY = items.length ? Math.min(...items.map((t) => t.y)) : MM(12.7);
+    const topMm = Math.max(3, Math.min(doc ? doc.edge + bandMm('header') + 3 : 12.7, firstY * ipp * 25.4));
+    const lowest = items.length ? Math.max(...ye) : 0;
+    const botMm = Math.max(0, Math.min(doc ? doc.edge + bandMm('footer') + 3 : 12.7, ((H - lowest) * ipp * 25.4) - 1));
+    flowMargins[n] = { top: MMTW(topMm), bottom: MMTW(botMm), left: TW(Lp), right: TW(Rp) };
+    // where Word will really put each item: text in exact lines (n × pitch) whose first line sits a bit lower
+    for (const it of items) {
+      if (it.kind === 'text') {
+        const fpx = firstStyle(it).fontSize || 20;
+        const pitch = fpx * it.scale * it.lineHeight * FONT_SIZE_MULT;
+        it.wTop = it.y - firstLineShift(it, fpx, 'docx');
+        it.wH = Math.max(1, it.lines.length) * pitch;
+      } else { it.wTop = it.y; it.wH = it.h; }
+    }
+    // rows: items whose vertical ranges overlap and do not overlap sideways sit next to each other
+    items.sort((a, b) => a.y - b.y || a.x - b.x);
+    const rows = [];
+    for (const it of items) {
+      const row = rows[rows.length - 1];
+      const fits = row && row.items.every((o) => o.x + o.w <= it.x + 1 || it.x + it.w <= o.x + 1)
+        && it.y < row.bottom - Math.min(it.h, row.minH) * 0.5;
+      if (fits) { row.items.push(it); row.bottom = Math.max(row.bottom, it.y + it.h); row.minH = Math.min(row.minH, it.h); row.wTop = Math.min(row.wTop, it.wTop); row.wBottom = Math.max(row.wBottom, it.wTop + it.wH); }
+      else rows.push({ items: [it], top: it.y, bottom: it.y + it.h, minH: it.h, wTop: it.wTop, wBottom: it.wTop + it.wH });
+    }
+    const out = [];
+    let prev = MM(topMm);
+    const twGap = (px) => Math.max(0, TW(px));
+    for (const row of rows) {
+      const before = twGap(row.wTop - prev);
+      if (row.items.length === 1) {
+        const it = row.items[0];
+        const extra = it.kind === 'text' ? it.w * 0.03 : 0; // Word's Thai line breaking needs a hair more room
+        const snap = (v) => (Math.abs(v) < TW(MM(2)) ? 0 : v); // a hair of indent only gets in the way when editing
+        out.push(...flowItem(it, { indentL: snap(TW(it.x - Lp)), indentR: snap(Math.max(0, TW(W - Rp - (it.x + it.w) - extra))), before }));
+      } else {
+        // invisible table, one cell per item
+        const cols = row.items.slice().sort((a, b) => a.x - b.x);
+        const x0 = cols[0].x;
+        const edges = cols.map((c, i) => (i + 1 < cols.length ? cols[i + 1].x : Math.max(c.x + c.w, W - Rp)));
+        const widths = cols.map((c, i) => Math.max(TW(20), TW(edges[i] - c.x)));
+        const none = { style: D.BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+        if (before > 40) out.push(new D.Paragraph({ spacing: { before: 0, after: 0, line: Math.max(20, before), lineRule: D.LineRuleType.EXACT }, children: [] }));
+        out.push(new D.Table({
+          layout: D.TableLayoutType.FIXED, columnWidths: widths, width: { size: widths.reduce((a, b) => a + b, 0), type: D.WidthType.DXA },
+          indent: { size: TW(x0 - Lp), type: D.WidthType.DXA },
+          borders: { top: none, bottom: none, left: none, right: none, insideHorizontal: none, insideVertical: none },
+          rows: [new D.TableRow({
+            children: cols.map((c, i) => new D.TableCell({
+              width: { size: widths[i], type: D.WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 },
+              borders: { top: none, bottom: none, left: none, right: none },
+              children: flowItem(c, { indentL: 0, indentR: Math.max(0, TW(edges[i] - (c.x + c.w))), before: twGap(c.wTop - row.wTop) }),
+            })),
+          })],
+        }));
+      }
+      prev = row.wBottom;
+    }
+    return [...out, ...pinnedOut];
+  };
+
   const sections = [];
   let coloredBg = false;
   for (let n = 0; n < pages.length; n++) {
@@ -629,7 +788,9 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
     model.items.forEach((it, i) => {
       if (it.kind === 'image' || it.kind === 'chart') it.front = model.items.slice(0, i).some((t) => (t.kind === 'text' || t.kind === 'table') && overlaps(t, it));
     });
-    for (const it of model.items) {
+    if (mode === 'flow') {
+      flow.push(...flowPage(model, anchors, () => z++, n));
+    } else for (const it of model.items) {
       if (it.kind === 'image') {
         anchors.push(new D.ImageRun({ type: 'png', data: dataOf(it.data), transformation: { width: P96(it.w), height: P96(it.h) }, floating: floating(it.x, it.y, z++, !it.front), altText: { name: it.alt || 'ภาพ', description: it.alt || '', title: it.alt || '' } }));
       } else if (it.kind === 'chart') {
@@ -647,7 +808,7 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
         page: {
           size: { width: TW(design.width), height: TW(design.height) },
           // real margins so text typed later in Word starts inside the page (the design itself is positioned absolutely)
-          margin: { ...bodyMargins, header: doc ? MMTW(doc.edge) : 0, footer: doc ? MMTW(doc.edge) : 0, gutter: 0 },
+          margin: { ...(mode === 'flow' ? flowMargins[n] : bodyMargins), header: doc ? MMTW(doc.edge) : 0, footer: doc ? MMTW(doc.edge) : 0, gutter: 0 },
           ...(pageBorders ? { borders: pageBorders } : {}),
         },
         ...(headerSet && n === 0 && headerSet.titlePage ? { titlePage: true } : {}),
@@ -665,6 +826,7 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
       // neutral heading styles: the look comes from each run, the styles give Word's navigation pane / table of contents the outline
       paragraphStyles: [1, 2].map((lv) => ({ id: `Heading${lv}`, name: `heading ${lv}`, basedOn: 'Normal', next: 'Normal', quickFormat: true, paragraph: { outlineLevel: lv - 1, spacing: { before: 0, after: 0 } }, run: { color: '000000' } })),
     },
+    numbering: { config: listConfig },
     sections,
   });
   let blob = await fixChartFonts(await D.Packer.toBlob(wordDoc));

@@ -106,6 +106,7 @@ async function exportAs(fmt, opts = {}) {
   if (opts.cmyk) await page.check('[data-cmyk]');
   if (opts.editable === false) await page.uncheck('[data-editable]');
   if (opts.searchable === false) await page.uncheck('[data-searchable]');
+  if (opts.docxMode) await page.selectOption('[data-docxmode]', opts.docxMode);
   if (opts.pages) {
     await page.selectOption('[data-pages-sel]', opts.pages === 'cur' ? 'cur' : 'custom');
     if (opts.pages !== 'cur') await page.fill('[data-pages-custom]', opts.pages);
@@ -1999,6 +2000,10 @@ function meanDiff(a, b) {
     const sections = (xml.match(/<w:sectPr/g) || []).length;
     assert(sections === 3, 'sections ' + sections);
     assert(/<w:t[^>]*>[^<]+<\/w:t>/.test(xml) && /w:cs="/.test(xml) && xml.includes('w:framePr'), 'docx text/fonts/frames');
+    // document mode: the same pages as flowing paragraphs, no text frames
+    const f = await JSZip.loadAsync(await exportAs('docx', { docxMode: 'flow' }));
+    const fx = await f.file('word/document.xml').async('string');
+    assert((fx.match(/<w:sectPr/g) || []).length === 3 && !fx.includes('w:framePr') && /<w:t[^>]*>[^<]+<\/w:t>/.test(fx), 'flow docx');
   });
   await step('ไฟล์โปรเจกต์ .json แล้วนำเข้ากลับได้ครบ', async () => {
     const b = await exportAs('json');
