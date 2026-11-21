@@ -9,6 +9,7 @@
 import { Textbox } from 'fabric';
 
 const words = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('th', { granularity: 'word' }) : null;
+const clusters = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('th', { granularity: 'grapheme' }) : null;
 const OPENERS = /^[([{"'“‘«]/;
 
 /** Break opportunities of one line: words with the punctuation/spaces that follow them. */
@@ -47,8 +48,14 @@ if (words) {
         largestWordWidth = Math.max(largestWordWidth, w);
         offset += g.length;
       };
-      // a single word wider than the box widens the box (as Fabric always did) instead of being cut
-      for (const p of pieces) push(this.graphemeSplit(p));
+      // a single word wider than the box widens the box (as Fabric always did) instead of being cut,
+      // except in boxes that must keep their width (table cells): there it breaks between characters
+      for (const p of pieces) {
+        const g = this.graphemeSplit(p);
+        if (this.breakLongWords && g.length > 1 && this._measureWord(g, lineIndex, offset) > this.width) {
+          for (const c of clusters.segment(p)) push(this.graphemeSplit(c.segment));
+        } else push(g);
+      }
       return res;
     });
     return { wordsData, largestWordWidth };

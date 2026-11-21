@@ -46,7 +46,10 @@ export function buildTable(d) {
         fill: isHead ? d.headerColor : d.color,
         textAlign: d.align,
         splitByGrapheme: true,
+        breakLongWords: true, // a cell keeps its width: an over-long word/link breaks between characters
       });
+      t.set({ width: d.cellWidth - pad * 2 });
+      t.initDimensions();
       texts.push(t);
     }
     const rowH = Math.max(d.fontSize * 1.3, ...texts.map((t) => t.height)) + pad * 2;

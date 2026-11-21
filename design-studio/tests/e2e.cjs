@@ -929,6 +929,46 @@ function meanDiff(a, b) {
     await wait(400);
     assert(await ev(() => __lai.canvas.getObjects().some((o) => o.smart?.chart === 'pie')), 'reload');
   });
+  await step('กราฟทุกชนิดกับข้อมูลยาก (ว่าง, ศูนย์ทั้งหมด, ติดลบ, ใหญ่มาก, 30 หมวด, ชื่อยาว) ไม่พัง ไม่มีค่า NaN ไม่ล้นกรอบ · ตารางคำยาวไม่ล้นช่อง', async () => {
+    const TYPES = [...fs.readFileSync(path.join(__dirname, '../src/charts.js'), 'utf8').matchAll(/\['([a-z][a-z0-9-]*)', '[^']+', '[^']+'/g)].map((m) => m[1]);
+    const out = await ev(async (TYPES) => {
+      const L = __lai, out = [];
+      const keep = L.serialize();
+      const DATA = {
+        empty: { labels: [], values: [] }, zeros: { labels: ['ก', 'ข', 'ค'], values: [0, 0, 0] },
+        negative: { labels: ['ก', 'ข', 'ค', 'ง'], values: [-5, 12, -20, 8] }, huge: { labels: ['A', 'B'], values: [1.25e9, 3e9] },
+        many: { labels: Array.from({ length: 30 }, (_, i) => 'วันที่ ' + (i + 1)), values: Array.from({ length: 30 }, (_, i) => (i * 7) % 23 + 1) },
+        longLabels: { labels: ['ค่าใช้จ่ายด้านการศึกษาและพัฒนาบุคลากรทั้งหมด', 'งบประมาณสำหรับการจัดซื้อจัดจ้างครุภัณฑ์คอมพิวเตอร์', 'อื่น ๆ'], values: [45, 30, 25] },
+      };
+      const bad = (o) => { let s = ''; const walk = (x) => { for (const k of ['left', 'top', 'width', 'height', 'radius']) if (x[k] !== undefined && !Number.isFinite(x[k])) s += `${x.type}.${k} `; if (x.path && JSON.stringify(x.path).includes('null')) s += 'path '; if (x.points && JSON.stringify(x.points).includes('null')) s += 'points '; (x._objects || []).forEach(walk); }; walk(o); return s; };
+      for (const t of TYPES) for (const [name, data] of Object.entries(DATA)) {
+        L.canvas.remove(...L.canvas.getObjects());
+        await L.addSmart(t);
+        const o = L.canvas.getObjects()[0];
+        const d = { ...o.smart, labels: data.labels, values: data.values };
+        if (d.series) d.series = [{ name: 'ชุด 1', values: data.values }, { name: 'ชุด 2', values: data.values.map((v) => v / 2) }];
+        try { await L.rebuildSmart(o, d, { silent: true }); } catch (e) { out.push(`${t}/${name}: ${e.message}`); continue; }
+        const n = L.canvas.getObjects()[0];
+        const b = bad(n);
+        if (b) out.push(`${t}/${name}: NaN ${b}`);
+        n.setCoords();
+        const r = n.getBoundingRect();
+        if (r.width > o.smart.width * 1.15 || r.height > o.smart.height * 1.15) out.push(`${t}/${name}: ${Math.round(r.width)}x${Math.round(r.height)} > ${o.smart.width}x${o.smart.height}`);
+      }
+      L.canvas.remove(...L.canvas.getObjects());
+      await L.addSmart('table');
+      const tb = L.canvas.getObjects()[0];
+      await L.rebuildSmart(tb, { ...tb.smart, rows: [['ก', 'ข'], ['https://www.example.com/very/long/link/without/spaces', 'Supercalifragilisticexpialidocious']] }, { silent: true });
+      const nt = L.canvas.getObjects()[0];
+      for (const x of nt._objects.filter((x) => /text/.test(x.type))) if (x.width > nt.smart.cellWidth) out.push(`table: "${x.text.slice(0, 12)}" wider than its cell`);
+      await L.canvas.loadFromJSON(JSON.parse(keep));
+      L.canvas.requestRenderAll();
+      L.commit();
+      return out;
+    }, TYPES);
+    assert(TYPES.length >= 30, 'types ' + TYPES.length);
+    assert(!out.length, out.slice(0, 6).join(' | '));
+  });
   await step('QR Code: เพิ่ม แก้ลิงก์ สี พื้นโปร่งใส', async () => {
     await page.click('[data-act="smart:qr"]');
     await page.click('[data-act="smart-edit"]');

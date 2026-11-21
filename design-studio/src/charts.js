@@ -64,9 +64,31 @@ export function niceScale(min, max, ticks = 5) {
   return { min: Math.floor(min / step) * step, max: Math.ceil(max / step) * step, step };
 }
 
+/** Make a text label fit `maxW`: shrink a little (to 80%), then shorten it with '…'. The full text stays in the data. */
+function fitText(t, maxW) {
+  if (!(maxW > 0) || t.width * (t.scaleX || 1) <= maxW) return t;
+  const k = Math.max(0.8, maxW / t.width);
+  t.set({ scaleX: k, scaleY: k });
+  if (t.width * k <= maxW) return t;
+  const chars = [...t.text];
+  let lo = 0, hi = chars.length;
+  while (lo < hi) { // longest prefix that fits with the ellipsis
+    const mid = Math.ceil((lo + hi) / 2);
+    t.set('text', chars.slice(0, mid).join('') + '…');
+    if (t.width * k <= maxW) lo = mid; else hi = mid - 1;
+  }
+  t.set('text', chars.slice(0, Math.max(1, lo)).join('') + '…');
+  return t;
+}
+
+const compact = typeof Intl !== 'undefined' ? new Intl.NumberFormat('th-TH', { notation: 'compact', maximumFractionDigits: 1 }) : null;
+/** Axis tick: short form for big numbers (3 พันล้าน) so the axis never widens the chart. */
+const fmtAxis = (n) => (compact && Math.abs(n) >= 1e6 ? compact.format(n) : fmt(n));
 const fmt = (n) => (typeof n === 'string' ? n : Math.abs(n) >= 1000 ? n.toLocaleString('en-US') : Number.isInteger(n) ? String(n) : (+n).toFixed(1));
 
 export function buildChart(d) {
+  // no data at all: draw an empty placeholder category instead of invalid geometry
+  if (!d.labels || !d.labels.length) d = { ...d, labels: ['—'], values: [0], series: d.series && d.series.length ? d.series.map((x) => ({ ...x, values: [0] })) : d.series };
   const W = d.width, H = d.height;
   const fs = Math.max(10, Math.round(Math.min(W, H) * 0.055));
   const col = (i) => d.colors[i % d.colors.length];
@@ -144,17 +166,17 @@ function cartesian(objs, d, series, area, fs, txt, col, dir) {
     const zero = Math.abs(v) < 1e-9;
     if (vertical) {
       objs.push(new Line([plot.x, p, plot.x + plot.w, p], { stroke: zero ? d.color : 'rgba(127,127,127,0.25)', strokeWidth: zero ? 2 : 1 }));
-      objs.push(txt(fmt(+v.toFixed(6)) + (pct ? '%' : ''), { fontSize: fs * 0.75, originX: 'right', originY: 'center', left: plot.x - fs * 0.4, top: p, opacity: 0.7 }));
+      objs.push(txt(fmtAxis(+v.toFixed(6)) + (pct ? '%' : ''), { fontSize: fs * 0.75, originX: 'right', originY: 'center', left: plot.x - fs * 0.4, top: p, opacity: 0.7 }));
     } else {
       objs.push(new Line([p, plot.y, p, plot.y + plot.h], { stroke: zero ? d.color : 'rgba(127,127,127,0.25)', strokeWidth: zero ? 2 : 1 }));
-      objs.push(txt(fmt(+v.toFixed(6)) + (pct ? '%' : ''), { fontSize: fs * 0.7, originX: 'center', left: p, top: plot.y + plot.h + fs * 0.3, opacity: 0.7 }));
+      objs.push(txt(fmtAxis(+v.toFixed(6)) + (pct ? '%' : ''), { fontSize: fs * 0.7, originX: 'center', left: p, top: plot.y + plot.h + fs * 0.3, opacity: 0.7 }));
     }
   }
   const band = (vertical ? plot.w : plot.h) / n;
   const center = (j) => (vertical ? plot.x : plot.y) + band * (j + 0.5);
   d.labels.forEach((l, j) => {
-    if (vertical) objs.push(txt(l, { fontSize: fs * 0.8, originX: 'center', left: center(j), top: plot.y + plot.h + fs * 0.4 }));
-    else objs.push(txt(l, { fontSize: fs * 0.8, originX: 'right', originY: 'center', left: plot.x - fs * 0.4, top: center(j) }));
+    if (vertical) objs.push(fitText(txt(l, { fontSize: fs * 0.8, originX: 'center', left: center(j), top: plot.y + plot.h + fs * 0.4 }), band * 0.96));
+    else objs.push(fitText(txt(l, { fontSize: fs * 0.8, originX: 'right', originY: 'center', left: plot.x - fs * 0.4, top: center(j) }), labelW - fs * 0.5));
   });
   const valueLabel = (v, x, y, opts = {}) => { if (d.showValues) objs.push(txt(fmt(v), { fontSize: fs * 0.75, fontWeight: 'bold', ...opts, left: x, top: y })); };
   const rect = (a, b, c, e, fill) => {
@@ -218,7 +240,7 @@ function cartesian(objs, d, series, area, fs, txt, col, dir) {
     series.forEach((s, i) => {
       if (kind === 'line' || kind === 'area') { if (i > 0) return; }
       const pts = s.values.map((v, j) => {
-        const y = kind === 'area-stack' ? cum[j] + v : v;
+        const y = kind === 'area-stack' ? cum[j] + Math.max(0, v) : v;
         return { x: center(j), y: pos(y), v, base: kind === 'area-stack' ? cum[j] : 0 };
       });
       const c = col(kind === 'line' || kind === 'area' ? 0 : i);
@@ -233,7 +255,7 @@ function cartesian(objs, d, series, area, fs, txt, col, dir) {
       objs.push(new Path(path, { fill: '', stroke: c, strokeWidth: Math.max(3, fs * 0.2), strokeLineJoin: 'round', strokeLineCap: 'round', objectCaching: false }));
       if (kind !== 'step' && kind !== 'area-stack') pts.forEach((p) => objs.push(new Circle({ left: p.x, top: p.y, radius: fs * 0.28, originX: 'center', originY: 'center', fill: '#ffffff', stroke: c, strokeWidth: fs * 0.14 })));
       if (d.showValues && (series.length === 1 || kind === 'line' || kind === 'area')) pts.forEach((p) => valueLabel(p.v, p.x, p.y - fs * 0.55, { originX: 'center', originY: 'bottom' }));
-      if (kind === 'area-stack') s.values.forEach((v, j) => { cum[j] += v; });
+      if (kind === 'area-stack') s.values.forEach((v, j) => { cum[j] += Math.max(0, v); });
       baseline[i] = 1;
     });
   }
@@ -260,11 +282,19 @@ const arcPath = (cx, cy, r, a0, a1, r2 = 0) => {
   return `M ${P(r, a0)} A ${r} ${r} 0 ${large} 1 ${P(r, a1)} L ${P(r2, a1)} A ${r2} ${r2} 0 ${large} 0 ${P(r2, a0)} Z`;
 };
 
-function legend(objs, d, items, x, y, fs, txt, col) {
+/** Colour key beside a round chart; it always fits maxW × maxH (more columns, then smaller text). */
+function legend(objs, d, items, x, y, fs, txt, col, maxW = Infinity, maxH = Infinity) {
+  const n = items.length;
+  let cols = 1, k = 1;
+  for (cols = 1; cols <= 4; cols++) {
+    k = Math.min(1, maxH / (Math.ceil(n / cols) * fs * 1.6));
+    if (k >= 0.62 || cols === 4) break;
+  }
+  const f = fs * k, colW = maxW / cols, perCol = Math.ceil(n / cols);
   items.forEach((label, i) => {
-    const ly = y + i * fs * 1.6;
-    objs.push(new Rect({ left: x, top: ly, width: fs, height: fs, rx: 3, ry: 3, fill: col(i) }));
-    objs.push(txt(label, { fontSize: fs * 0.85, left: x + fs * 1.5, top: ly - fs * 0.05 }));
+    const lx = x + Math.floor(i / perCol) * colW, ly = y + (i % perCol) * f * 1.6;
+    objs.push(new Rect({ left: lx, top: ly, width: f, height: f, rx: 3, ry: 3, fill: col(i) }));
+    objs.push(fitText(txt(label, { fontSize: f * 0.85, left: lx + f * 1.5, top: ly - f * 0.05 }), colW - f * 1.7));
   });
 }
 
@@ -286,7 +316,7 @@ function pie(objs, d, vals, a, fs, txt, col) {
     }
     a0 = a1;
   });
-  legend(objs, d, d.labels.map((l, i) => `${l} (${fmt(vals[i])})`), a.w - legendW + fs, a.y + fs * 0.5, fs, txt, col);
+  legend(objs, d, d.labels.map((l, i) => `${l} (${fmt(vals[i])})`), a.w - legendW + fs, a.y + fs * 0.5, fs, txt, col, legendW - fs, a.h - fs * 0.5);
 }
 
 function polar(objs, d, vals, a, fs, txt, col) {
@@ -300,7 +330,7 @@ function polar(objs, d, vals, a, fs, txt, col) {
     const r = Math.max(2, (R * Math.max(0, v)) / max);
     objs.push(new Path(arcPath(cx, cy, r, -Math.PI / 2 + i * step, -Math.PI / 2 + (i + 1) * step), { fill: col(i), opacity: 0.85, stroke: '#ffffff', strokeWidth: 2 }));
   });
-  legend(objs, d, d.labels.map((l, i) => `${l} (${fmt(vals[i])})`), a.w - legendW + fs, a.y + fs * 0.5, fs, txt, col);
+  legend(objs, d, d.labels.map((l, i) => `${l} (${fmt(vals[i])})`), a.w - legendW + fs, a.y + fs * 0.5, fs, txt, col, legendW - fs, a.h - fs * 0.5);
 }
 
 function radial(objs, d, vals, a, fs, txt, col) {
@@ -314,7 +344,7 @@ function radial(objs, d, vals, a, fs, txt, col) {
     const p = Math.max(0, Math.min(100, v));
     if (p > 0) objs.push(new Path(arcPath(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * p) / 100, r2), { fill: col(i) }));
   });
-  legend(objs, d, d.labels.map((l, i) => `${l} ${fmt(vals[i])}%`), a.w - legendW + fs, a.y + fs * 0.5, fs, txt, col);
+  legend(objs, d, d.labels.map((l, i) => `${l} ${fmt(vals[i])}%`), a.w - legendW + fs, a.y + fs * 0.5, fs, txt, col, legendW - fs, a.h - fs * 0.5);
 }
 
 function radar(objs, d, series, a, fs, txt, col) {
@@ -343,13 +373,13 @@ function scatter(objs, d, series, a, fs, txt, col) {
   const sx = niceScale(Math.min(0, ...xs), Math.max(...xs)), sy = niceScale(Math.min(0, ...ys.flat()), Math.max(...ys.flat()));
   const plot = { x: a.x + fs * 2.8, y: a.y + fs * 0.4, w: a.w - fs * 3.4, h: a.h - fs * 2.2 };
   const X = (v) => plot.x + ((v - sx.min) / (sx.max - sx.min)) * plot.w, Y = (v) => plot.y + plot.h - ((v - sy.min) / (sy.max - sy.min)) * plot.h;
-  for (let v = sy.min; v <= sy.max + 1e-9; v += sy.step) { objs.push(new Line([plot.x, Y(v), plot.x + plot.w, Y(v)], { stroke: 'rgba(127,127,127,0.25)', strokeWidth: 1 })); objs.push(txt(fmt(+v.toFixed(6)), { fontSize: fs * 0.75, originX: 'right', originY: 'center', left: plot.x - fs * 0.4, top: Y(v), opacity: 0.7 })); }
-  for (let v = sx.min; v <= sx.max + 1e-9; v += sx.step) objs.push(txt(fmt(+v.toFixed(6)), { fontSize: fs * 0.75, originX: 'center', left: X(v), top: plot.y + plot.h + fs * 0.4, opacity: 0.7 }));
+  for (let v = sy.min; v <= sy.max + 1e-9; v += sy.step) { objs.push(new Line([plot.x, Y(v), plot.x + plot.w, Y(v)], { stroke: 'rgba(127,127,127,0.25)', strokeWidth: 1 })); objs.push(txt(fmtAxis(+v.toFixed(6)), { fontSize: fs * 0.75, originX: 'right', originY: 'center', left: plot.x - fs * 0.4, top: Y(v), opacity: 0.7 })); }
+  for (let v = sx.min; v <= sx.max + 1e-9; v += sx.step) objs.push(txt(fmtAxis(+v.toFixed(6)), { fontSize: fs * 0.75, originX: 'center', left: X(v), top: plot.y + plot.h + fs * 0.4, opacity: 0.7 }));
   objs.push(new Line([plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h], { stroke: d.color, strokeWidth: 2 }));
   if (bubble) {
     const sizes = (series[1] || series[0]).values;
     const smax = Math.max(1, ...sizes);
-    xs.forEach((x, i) => objs.push(new Circle({ left: X(x), top: Y(series[0].values[i]), radius: Math.max(4, Math.sqrt(sizes[i] / smax) * fs * 2.2), originX: 'center', originY: 'center', fill: col(i), opacity: 0.7, stroke: '#ffffff', strokeWidth: 1.5 })));
+    xs.forEach((x, i) => objs.push(new Circle({ left: X(x), top: Y(series[0].values[i]), radius: Math.max(4, Math.sqrt(Math.max(0, sizes[i]) / smax) * fs * 2.2), originX: 'center', originY: 'center', fill: col(i), opacity: 0.7, stroke: '#ffffff', strokeWidth: 1.5 })));
   } else {
     ys.forEach((vals, si) => xs.forEach((x, i) => objs.push(new Circle({ left: X(x), top: Y(vals[i]), radius: fs * 0.38, originX: 'center', originY: 'center', fill: col(si), opacity: 0.85 }))));
   }
@@ -384,7 +414,15 @@ function funnel(objs, d, vals, a, fs, txt, col) {
     objs.push(new Polygon([{ x: cx - w1 / 2, y }, { x: cx + w1 / 2, y }, { x: cx + w2 / 2, y: y + h - 3 }, { x: cx - w2 / 2, y: y + h - 3 }], { fill: col(i) }));
     const label = txt(`${d.labels[i]}${d.showValues ? `  ${fmt(v)}` : ''}`, { fontSize: fs * 0.85, fontWeight: 'bold', fill: '#ffffff', originX: 'center', originY: 'center', left: cx, top: y + h / 2 });
     // too narrow for the label: put it beside the segment in the normal text colour
-    if (label.width > Math.min(w1, w2) * 0.92) label.set({ fill: d.color, originX: 'left', left: cx + Math.max(w1, w2) / 2 + fs * 0.4 });
+    if (label.width > Math.min(w1, w2) * 0.92) {
+      const lx = cx + Math.max(w1, w2) / 2 + fs * 0.4, room = a.w - lx;
+      if (label.width <= room) label.set({ fill: d.color, originX: 'left', left: lx });
+      else {
+        // no room beside it either: shrink the label onto the segment, dark text on a light band
+        const k = Math.max(0.45, Math.min(1, (a.w * 0.96) / label.width));
+        label.set({ fill: d.color, scaleX: k, scaleY: k, textBackgroundColor: 'rgba(255,255,255,0.85)' });
+      }
+    }
     objs.push(label);
   });
 }
@@ -402,7 +440,7 @@ function treemap(objs, d, vals, a, fs, txt, col) {
     remaining -= it.v;
     objs.push(new Rect({ left: r.x + 1.5, top: r.y + 1.5, width: Math.max(1, r.w - 3), height: Math.max(1, r.h - 3), rx: 6, ry: 6, fill: col(it.i) }));
     if (r.w > fs * 3 && r.h > fs * 1.6) {
-      objs.push(txt(d.labels[it.i], { fontSize: fs * 0.85, fontWeight: 'bold', fill: '#ffffff', left: r.x + fs * 0.5, top: r.y + fs * 0.4 }));
+      objs.push(fitText(txt(d.labels[it.i], { fontSize: fs * 0.85, fontWeight: 'bold', fill: '#ffffff', left: r.x + fs * 0.5, top: r.y + fs * 0.4 }), r.w - fs));
       if (d.showValues) objs.push(txt(`${Math.round((it.v / total) * 100)}%`, { fontSize: fs * 0.75, fill: '#ffffff', left: r.x + fs * 0.5, top: r.y + fs * 1.5 }));
     }
   });
@@ -419,7 +457,7 @@ function gauge(objs, d, vals, a, fs, txt, col) {
   objs.push(new Circle({ left: cx, top: cy, radius: fs * 0.4, originX: 'center', originY: 'center', fill: d.color }));
   // value under the pivot so the needle never covers it
   objs.push(txt(`${fmt(p)}%`, { fontSize: fs * 1.6, fontWeight: 'bold', originX: 'center', originY: 'top', left: cx, top: cy + fs * 0.55, fill: col(0) }));
-  objs.push(txt(d.labels[0] || '', { fontSize: fs * 0.8, originX: 'right', originY: 'top', left: cx - R * 0.55, top: cy + fs * 0.5, opacity: 0.75 }));
+  objs.push(fitText(txt(d.labels[0] || '', { fontSize: fs * 0.8, originX: 'right', originY: 'top', left: cx - R * 0.55, top: cy + fs * 0.5, opacity: 0.75 }), cx - R * 0.55));
 }
 
 function stat(objs, d, vals, a, fs0, txt, col) {
@@ -431,7 +469,7 @@ function stat(objs, d, vals, a, fs0, txt, col) {
     const big = txt(fmt(v), { fontSize: Math.min(fs * 2.2, a.h * 0.42), fontWeight: 'bold', fill: col(i), originX: 'center', originY: 'center', left: x + w / 2, top: a.y + a.h * 0.42 });
     if (big.width > w * 0.9) big.set({ fontSize: (big.fontSize * w * 0.9) / big.width });
     objs.push(big);
-    objs.push(txt(d.labels[i] || '', { fontSize: fs * 0.8, originX: 'center', originY: 'center', left: x + w / 2, top: a.y + a.h * 0.78, opacity: 0.8 }));
+    objs.push(fitText(txt(d.labels[i] || '', { fontSize: fs * 0.8, originX: 'center', originY: 'center', left: x + w / 2, top: a.y + a.h * 0.78, opacity: 0.8 }), w * 0.9));
   });
 }
 
