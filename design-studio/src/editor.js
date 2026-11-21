@@ -23,6 +23,29 @@ import { FRAME_SHAPES, FRAME_CATEGORIES, isFrameShape, frameClipPath, framePrevi
 import { DECO_FRAMES, decoFrame, decoPreview } from './decoframes.js';
 import { fillThumbs } from './thumbs.js';
 
+/** A colour typed by the user → '#rrggbb' / '#rrggbbaa', or null. Accepts #rgb, #rgba, #rrggbb, #rrggbbaa (with or
+ * without '#') and any CSS colour name or rgb()/hsl() value. */
+export function parseColor(input) {
+  const v = String(input || '').trim();
+  if (!v) return null;
+  const m = v.match(/^#?([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+  if (m) {
+    let h = m[1].toLowerCase();
+    if (h.length <= 4) h = [...h].map((c) => c + c).join('');
+    return '#' + h;
+  }
+  if (typeof CSS === 'undefined' || !CSS.supports('color', v)) return null;
+  const x = document.createElement('canvas').getContext('2d');
+  x.fillStyle = '#000000';
+  x.fillStyle = v;
+  const out = x.fillStyle; // '#rrggbb' or 'rgba(r, g, b, a)'
+  if (out.startsWith('#')) return out;
+  const n = out.match(/[\d.]+/g);
+  if (!n) return null;
+  const hx = (k) => Math.round(+k).toString(16).padStart(2, '0');
+  return '#' + hx(n[0]) + hx(n[1]) + hx(n[2]) + (n[3] !== undefined && +n[3] < 1 ? hx(+n[3] * 255) : '');
+}
+
 const CHART_ICON = { bar: '📊', 'bar-group': '📊', 'bar-stack': '▥', 'bar-stack100': '▥', hbar: '☰', 'hbar-group': '☰', 'hbar-stack': '☰', waterfall: '⛲', lollipop: '🍭',
   line: '📈', 'line-multi': '📈', 'line-smooth': '〰', step: '⌐', area: '◭', 'area-stack': '◭', pie: '◔', donut: '◎', halfdonut: '◠', polar: '✿', radial: '◉',
   radar: '🕸', scatter: '⁘', bubble: '⚬', heatmap: '▦', funnel: '⏷', treemap: '▤', dotplot: '•', progress: '▰', ring: '◌', pictogram: '👥', gauge: '⏲', stat: '🔢' };
@@ -1761,7 +1784,9 @@ export class Editor {
     } else if (kind === 'locked') {
       html = `<span class="ctx-label">🔒 ล็อกอยู่</span><span class="grow"></span>${btn('lock', 'lock', 'ปลดล็อก', false, 'ปลดล็อก')}`;
     } else if (kind === 'multi') {
-      html = `${btn('group', 'group', 'จัดกลุ่ม (Ctrl+G)', false, 'จัดกลุ่ม')}
+      // one colour for every selected object (like Canva); images/groups without a fill are skipped
+      const fills = a.getObjects().filter((o) => !isImage(o) && o.type !== 'group' && o.fill !== undefined);
+      html = `${fills.length ? sw('fill', fills[0].fill, 'สีของทุกชิ้นที่เลือก') : ''}${btn('group', 'group', 'จัดกลุ่ม (Ctrl+G)', false, 'จัดกลุ่ม')}
         ${btn('align:left', 'alignLeft', 'ชิดซ้าย')}${btn('align:center', 'alignCenter', 'กึ่งกลางแนวนอน')}${btn('align:right', 'alignRight', 'ชิดขวา')}
         ${btn('align:top', 'alignTop', 'ชิดบน')}${btn('align:middle', 'alignMiddle', 'กึ่งกลางแนวตั้ง')}${btn('align:bottom', 'alignBottom', 'ชิดล่าง')}
         ${btn('distribute:h', 'distH', 'เว้นระยะแนวนอนเท่ากัน')}${btn('distribute:v', 'distV', 'เว้นระยะแนวตั้งเท่ากัน')}
@@ -2012,13 +2037,23 @@ export class Editor {
     const hex = el.querySelector('[data-hex]');
     picker.addEventListener('input', () => { hex.value = picker.value; apply(picker.value, false); });
     picker.addEventListener('change', () => apply(picker.value, true));
-    hex.addEventListener('change', () => { const v = hex.value.trim(); if (/^#?[0-9a-f]{3,8}$/i.test(v)) apply(v.startsWith('#') ? v : '#' + v); });
+    hex.addEventListener('change', () => {
+      const v = parseColor(hex.value);
+      hex.classList.toggle('bad', !v);
+      if (!v) return toast('รหัสสีไม่ถูกต้อง ใช้แบบ #RRGGBB เช่น #FF5733 (หรือชื่อสีภาษาอังกฤษ เช่น red)', 'error');
+      hex.value = v;
+      picker.value = toHex(v);
+      apply(v);
+    });
   }
 
   documentColors() {
     const set = new Set();
     const walk = (o) => {
-      for (const p of ['fill', 'stroke']) if (typeof o[p] === 'string' && /^#/.test(o[p])) set.add(o[p].toLowerCase());
+      for (const p of ['fill', 'stroke']) {
+        if (typeof o[p] === 'string' && /^#/.test(o[p])) set.add(o[p].toLowerCase());
+        else if (o[p] && o[p].colorStops) o[p].colorStops.forEach((st) => /^#/.test(st.color) && set.add(st.color.toLowerCase()));
+      }
       if (o.getObjects) o.getObjects().forEach(walk);
     };
     this.canvas.getObjects().forEach(walk);

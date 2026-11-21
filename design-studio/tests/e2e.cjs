@@ -565,6 +565,37 @@ function meanDiff(a, b) {
     assert(await page.$('.popover [data-c="#abcdef"]'), 'doc color missing');
     await page.keyboard.press('Escape');
   });
+  await step('ช่องรหัสสี: รับ #RGB #RRGGBB #RRGGBBAA ชื่อสี/rgb() ปฏิเสธรหัสผิดพร้อมแจ้งเตือน · เปลี่ยนสีหลายชิ้นพร้อมกัน · สีไล่เฉดอยู่ใน "สีในงานนี้"', async () => {
+    await clearPage();
+    await panel('elements');
+    await page.click('[data-act="shape:0"]'); await page.click('[data-act="shape:1"]');
+    await page.waitForFunction(() => __lai.canvas.getObjects().length === 2);
+    await selectIndex(0);
+    for (const [inp, want] of [['#F00', '#ff0000'], ['00ff00', '#00ff00'], ['#11223344', '#11223344'], ['navy', '#000080'], ['rgb(0, 128, 255)', '#0080ff'], ['#12345', null], ['blah', null]]) {
+      await ev(() => { const o = __lai.canvas.getObjects()[0]; o.set('fill', '#7c5cff'); __lai.canvas.setActiveObject(o); __lai.renderCtx(); });
+      await page.click('[data-ctx] [data-act="color:fill"]');
+      await page.fill('.color-pop [data-hex]', inp);
+      await page.dispatchEvent('.color-pop [data-hex]', 'change');
+      await wait(100);
+      const f = await ev(() => __lai.canvas.getObjects()[0].fill);
+      if (want) assert(f === want, `${inp} → ${f}`);
+      else { assert(f === '#7c5cff', `invalid ${inp} applied as ${f}`); assert(await page.$('.toast.error'), 'error message for ' + inp); }
+      await page.keyboard.press('Escape');
+    }
+    // several objects at once
+    await page.keyboard.press('Control+a'); await wait(150);
+    await page.click('[data-ctx] [data-act="color:fill"]');
+    await page.click('.color-pop .swatches .sw[data-c]:not([data-c=""]) >> nth=4');
+    await wait(150);
+    const fills = await ev(() => __lai.canvas.getObjects().map((o) => o.fill));
+    assert(fills[0] === fills[1] && typeof fills[0] === 'string', 'multi colour ' + fills);
+    await page.keyboard.press('Escape');
+    // gradient colours are listed as document colours
+    await ev(() => { const o = __lai.canvas.getObjects()[0]; __lai.canvas.setActiveObject(o); __lai.setProp('fill', ['#123456', '#abcdef']); });
+    const doc = await ev(() => __lai.documentColors());
+    assert(doc.includes('#123456') && doc.includes('#abcdef'), 'gradient stops in document colours ' + doc);
+    await clearPage();
+  });
 
   // =============================================================== ELEMENTS
   group('5. องค์ประกอบ');
