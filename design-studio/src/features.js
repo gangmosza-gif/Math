@@ -773,7 +773,7 @@ export const features = {
 
   markDraggable(root) {
     root.querySelectorAll('[data-act]').forEach((el) => {
-      if (/^(shape|line|sticker|text|combo|up-add|logo-add|brand-text|photo|pattern|smart|frame):/.test(el.dataset.act)) {
+      if (/^(shape|line|sticker|text|combo|up-add|logo-add|brand-text|photo|pattern|smart|frame|gfx):/.test(el.dataset.act)) {
         el.draggable = true;
         el.querySelectorAll('img').forEach((i) => { i.draggable = false; });
       }

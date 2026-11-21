@@ -477,9 +477,61 @@ function meanDiff(a, b) {
   });
   await step('ค้นหาองค์ประกอบ ("ดาว") กรองผลถูกต้อง', async () => {
     await page.fill('[data-el-search]', 'ดาว');
-    const vis = await page.$$eval('.el, .smart-btn', (b) => b.filter((x) => !x.hidden).map((x) => x.title));
+    const vis = await page.$$eval('.el, .smart-btn', (b) => b.filter((x) => !x.hidden && !x.closest('[hidden]')).map((x) => x.title));
     assert(vis.length >= 2 && vis.every((t) => t.includes('ดาว')), vis.join());
     await page.fill('[data-el-search]', '');
+  });
+  await step('คลังองค์ประกอบ: รูปทรง 9 ตระกูล กราฟิก 18 คอลเลกชัน สติกเกอร์ 3 มิติ ไอคอนเปลี่ยนสีได้ โลโก้ ค้นหาภาษาไทย ใช้ล่าสุด', async () => {
+    await clearPage();
+    await panel('elements');
+    await page.waitForSelector('.col-card', { timeout: 30000 });
+    assert((await page.$$('.col-card')).length >= 10, 'collection cards');
+    // all shapes
+    await page.click('[data-el-view="shapes"]');
+    const nShapes = await page.$$eval('.el-view .el.gfx', (e) => e.length);
+    assert(nShapes >= 60, `shapes ${nShapes}`);
+    await page.click('[data-act="gfx:sf|cloud|0"]');
+    await page.click('[data-act="gfx:sf|gear|0"]');
+    let o = await ev(() => { const a = __lai.canvas.getActiveObject(); return [a.type, a.fillRule, a.name]; });
+    assert(o[0] === 'path' && o[1] === 'evenodd', `gear ${o}`);
+    await page.click('.el-view-head [data-el-view=""]');
+    // a 3D sticker: a sharp picture
+    await page.click('[data-el-view="col:3d"]');
+    await page.click('.el-view .el.gfx >> nth=0');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.graphic?.c === '3d');
+    o = await ev(() => { const a = __lai.canvas.getActiveObject(); return [a.type, a.width]; });
+    assert(o[0] === 'image' && o[1] >= 512, `3d ${o}`);
+    await page.click('.el-view-head [data-el-view=""]');
+    // a line icon: vector, recolourable from the toolbar
+    await page.click('[data-el-view="icons"]');
+    await page.click('.el-view .el.gfx >> nth=0');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.graphic?.mono);
+    await page.click('[data-act="color:graphic"]');
+    await page.click('.popover [data-c="#ff3131"]');
+    await page.keyboard.press('Escape');
+    const strokes = await ev(() => __lai.canvas.getActiveObject().getObjects().map((p) => p.stroke).filter((s) => s && s !== 'none'));
+    assert(strokes.length && strokes.every((s) => s === '#ff3131'), `recolour ${strokes}`);
+    await page.click('.el-view-head [data-el-view=""]');
+    // Thai search finds graphics; a brand logo keeps its colour
+    await page.fill('[data-el-search]', 'แมว');
+    assert((await page.$$('[data-el-results] .el')).length >= 2, 'search cat');
+    await page.fill('[data-el-search]', 'facebook');
+    await page.click('[data-el-results] .el >> nth=0');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.graphic?.c === 'social');
+    await page.fill('[data-el-search]', '');
+    // recently used row
+    await panel('text'); await panel('elements');
+    await page.waitForSelector('.col-card');
+    assert(await page.$('.el-row-head b >> text=ใช้งานล่าสุด'), 'recent row');
+    // saved and reloaded with the page, rendered in exports
+    await ev(() => __lai.commit());
+    await ev(() => __lai.loadPage(__lai.cur));
+    await wait(800);
+    const kinds = await ev(() => __lai.canvas.getObjects().map((x) => x.type + (x.graphic ? '*' : '')).join());
+    assert(kinds === 'path,path,image*,group*,path*', kinds);
+    const png = await exportAs('png', { pages: 'cur' });
+    assert(isPNG(png) && png.length > 20000, 'png export');
+    await clearPage();
   });
   await step('รูปทรง: เส้นขอบ ความหนาขอบ มุมมน', async () => {
     await clearPage();
@@ -646,7 +698,7 @@ function meanDiff(a, b) {
     const empty = await ev(() => __lai.canvas.getObjects().filter((o) => o.smart?.type === 'icon' && o.getObjects().length < 2).map((o) => o.smart.name));
     assert(!empty.length, 'icons without paths: ' + empty);
     await page.fill('[data-el-search]', 'กล้อง');
-    const vis = await page.$$eval('.el, .smart-btn', (b) => b.filter((x) => !x.hidden).length);
+    const vis = await page.$$eval('.el-grid.icons .el', (b) => b.filter((x) => !x.hidden).length);
     assert(vis === 1, `search ${vis}`);
     await page.fill('[data-el-search]', '');
     await page.click('[data-act="color:iconColor"]');

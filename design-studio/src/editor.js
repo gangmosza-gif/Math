@@ -12,6 +12,7 @@ export { safeURL };
 import { saveDesign, listUploads, saveUpload, deleteUpload, uid } from './storage.js';
 import { PRESETS } from './presets.js';
 import { PATTERNS, PHOTO_LIBRARY } from './patterns.js';
+import { loadGraphics, elementsHomeHTML, elementsViewHTML, elementsSearchHTML, makeElement, recolorGraphic } from './elements.js';
 import { docSettings, hasDoc, docDecorations, decorationObjects, decorationFonts, visibleNumber, PAGE_NUM_FORMATS, WATERMARK_PRESETS, BORDER_STYLES } from './docsetup.js';
 import { Vignette, warmthMatrix, tintMatrix, duotoneMatrix, sharpen } from './filters.js';
 import { fileToDataURL } from './imageutil.js';
@@ -39,7 +40,7 @@ Object.assign(InteractiveFabricObject.ownDefaults, {
   padding: 2,
 });
 
-const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder', 'link', 'alt', 'autoPage', 'shapeText', 'autoToc'];
+const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder', 'link', 'alt', 'autoPage', 'shapeText', 'autoToc', 'graphic'];
 export const BLANK_PAGE = (bg = '#ffffff') => JSON.stringify({ version: '6.9.1', objects: [], background: bg });
 
 const COLORS = [
@@ -888,6 +889,8 @@ export class Editor {
   // ---------------------------------------------------------------- UI binding
   bindUI() {
     this.el.addEventListener('click', (e) => {
+      const ev = e.target.closest('[data-el-view]');
+      if (ev && this.el.contains(ev)) { this._elView = ev.dataset.elView; return this.renderPanel(); }
       const b = e.target.closest('[data-act]');
       if (b && this.el.contains(b)) return this.action(b.dataset.act, b, e);
       const pb = e.target.closest('[data-panel]');
@@ -1515,7 +1518,7 @@ export class Editor {
         ${btn('ungroup', 'ungroup', 'แยกข้อความออกจากรูปทรง', false, 'แยก')}
         ${common()}`;
     } else if (kind === 'group') {
-      html = `${btn('ungroup', 'ungroup', 'ยกเลิกกลุ่ม (Ctrl+Shift+G)', false, 'ยกเลิกกลุ่ม')}
+      html = `${a.graphic && a.graphic.mono ? sw('graphic', a.graphic.color, 'สีกราฟิก') : ''}${btn('ungroup', 'ungroup', 'ยกเลิกกลุ่ม (Ctrl+Shift+G)', false, 'ยกเลิกกลุ่ม')}
         ${btn('flip:flipX', 'flipH', 'พลิกแนวนอน')}${btn('flip:flipY', 'flipV', 'พลิกแนวตั้ง')}${common()}`;
     } else if (kind === 'text') {
       const fam = a.fontFamily;
@@ -1702,6 +1705,8 @@ export class Editor {
         if (final) this.commit();
       } else if (prop === 'iconColor') {
         if (final && v && iconTarget && iconTarget.canvas) this.rebuildSmart(iconTarget, { ...iconTarget.smart, color: v }).then((n) => { if (n) this.renderCtx(); });
+      } else if (prop === 'graphic') {
+        if (v && !Array.isArray(v)) { recolorGraphic(a, v); this.canvas.requestRenderAll(); if (final) this.commit(); }
       } else if (prop === 'shadow') {
         const sh = a.shadow;
         if (sh) { sh.color = v; a.set('dirty', true); this.canvas.requestRenderAll(); if (final) this.commit(); }
@@ -2194,8 +2199,19 @@ export class Editor {
       });
       this.renderTemplateThumbs();
     } else if (p === 'elements') {
+      const gfx = this._gfx || null;
+      if (!gfx) loadGraphics().then((g) => { this._gfx = g; if (this.panel === 'elements') this.renderPanel(); }).catch((e) => console.error('graphics', e));
+      const view = this._elView || '';
+      if (view && gfx) {
+        body.innerHTML = `<div class="el-view">${elementsViewHTML(gfx, view)}</div>`;
+        body.scrollTop = 0;
+        this.markDraggable(body);
+        return;
+      }
       body.innerHTML = `
-        <input class="input full search" data-el-search placeholder="ค้นหาองค์ประกอบ เช่น ดาว, ตาราง, กราฟ" aria-label="ค้นหาองค์ประกอบ" />
+        <input class="input full search" data-el-search placeholder="ค้นหาองค์ประกอบ เช่น ดอกไม้ แมว หัวใจ ตาราง กราฟ" aria-label="ค้นหาองค์ประกอบ" value="${esc(this._elQ || '')}" />
+        <div data-el-results-box></div>
+        <div data-el-home>${elementsHomeHTML(gfx)}</div>
         <div class="sec-title">ตาราง QR สมการ</div>
         <div class="smart-grid">
           ${[['table', '▦', 'ตาราง'], ['qr', '▣', 'QR Code'], ['equation', '∑', 'สมการ']]
@@ -2220,11 +2236,17 @@ export class Editor {
         <div class="sec-title">สติกเกอร์</div>
         <div class="el-grid stickers">${STICKERS.map((s, i) => `<button class="el" data-act="sticker:${i}" title="สติกเกอร์ ${s}">${s}</button>`).join('')}</div>`;
       const q = body.querySelector('[data-el-search]');
-      q.addEventListener('input', () => {
+      const runSearch = () => {
         const v = q.value.trim().toLowerCase();
+        this._elQ = q.value;
+        body.querySelector('[data-el-results-box]').innerHTML = v ? elementsSearchHTML(this._gfx, v) : '';
+        body.querySelector('[data-el-home]').hidden = !!v;
+        this.markDraggable(body);
         body.querySelectorAll('.el, .smart-btn').forEach((b) => { b.hidden = !!v && !(b.title || '').toLowerCase().includes(v); });
         body.querySelectorAll('.sec-title').forEach((t) => { const g = t.nextElementSibling; t.hidden = g && [...g.children].every((c) => c.hidden); });
-      });
+      };
+      q.addEventListener('input', runSearch);
+      if (q.value) runSearch();
     } else if (p === 'text') {
       body.innerHTML = `
         <button class="btn primary full" data-act="text:heading">${icon('text', 18)} เพิ่มกล่องข้อความ</button>
@@ -2467,6 +2489,10 @@ export class Editor {
       case 'frame': return this.addFrame(+arg);
       case 'grid': return this.addGrid(+arg);
       case 'shape': return this.addShape(+arg);
+      case 'gfx': {
+        const id = act.slice(4);
+        return makeElement(this._gfx, id, this.U * 0.3).then((o) => o && this.addObject(o)).catch((e) => { console.error(e); toast('เพิ่มกราฟิกไม่สำเร็จ', 'error'); });
+      }
       case 'line': return this.addShape(+arg, LINES);
       case 'sticker': return this.addObject(Object.assign(makeSticker(STICKERS[+arg], this.U * 0.25), { name: 'สติกเกอร์' }));
       case 'text': return this.addText(arg);
