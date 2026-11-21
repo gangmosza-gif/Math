@@ -7,7 +7,7 @@ import {
   buildMockup, defaultMockup,
   buildIcon,
   buildTable, buildChart, buildQR, buildEquation, latexToSVG, placeholderImage,
-  defaultTable, defaultChart, defaultQR, defaultEquation, FRAMES, GRIDS, CHART_COLORS, CHART_TYPES, parseDelimited, rowsToSeries,
+  defaultTable, defaultChart, defaultQR, defaultEquation, FRAMES, GRIDS, CHART_COLORS, CHART_TYPES, MULTI_TYPES, seriesOf, rowsToData, parseDelimited,
 } from './smart.js';
 import { pageToDataURL, pageLinks, safeURL } from './export.js';
 import { fileToDataURL } from './imageutil.js';
@@ -187,13 +187,18 @@ export const features = {
 
   openChartEditor(obj) {
     const d = JSON.parse(JSON.stringify(obj.smart));
+    // the editor always works on a table: rows = labels, columns = series
+    let series = seriesOf(d).map((x) => ({ ...x, values: [...x.values] }));
     const m = modal({ title: 'แก้ไขกราฟ', wide: true, body: '<div data-ch></div>' });
     const box = m.el.querySelector('[data-ch]');
+    const groups = [...new Set(CHART_TYPES.map((t) => t[2]))];
     const render = () => {
+      const multi = MULTI_TYPES.includes(d.chart);
+      if (!multi) series = series.slice(0, 1);
       box.innerHTML = `
         <div class="opt-grid">
-          <label>ชนิดกราฟ <select class="select" data-o="chart">
-            ${CHART_TYPES.map(([k, l]) => `<option value="${k}" ${d.chart === k ? 'selected' : ''}>${l}</option>`).join('')}
+          <label>ชนิดกราฟ (${CHART_TYPES.length} แบบ) <select class="select" data-o="chart">
+            ${groups.map((g) => `<optgroup label="${esc(g)}">${CHART_TYPES.filter((t) => t[2] === g).map(([k, l]) => `<option value="${k}" ${d.chart === k ? 'selected' : ''}>${l}</option>`).join('')}</optgroup>`).join('')}
           </select></label>
           <label>ชื่อกราฟ <input class="input" data-o="title" value="${esc(d.title)}"></label>
           <label class="toggle-row"><input type="checkbox" data-o="showValues" ${d.showValues ? 'checked' : ''}> แสดงตัวเลข</label>
@@ -201,53 +206,74 @@ export const features = {
         </div>
         <div class="cp-title">ชุดสี</div>
         <div class="pal-row">${PALETTES.map((p, i) => `<button class="pal" data-pal="${i}" title="ชุดสี ${i + 1}">${p.slice(0, 5).map((c) => `<i style="background:${c}"></i>`).join('')}</button>`).join('')}</div>
-        <div class="cp-title">ข้อมูล</div>
-        <div class="data-rows">${d.labels.map((l, i) => `
-          <div class="data-row">
-            <i class="dot" style="background:${d.colors[i % d.colors.length]}"></i>
-            <input class="input" data-l="${i}" value="${esc(l)}" aria-label="ชื่อข้อมูล ${i + 1}">
-            <input class="input" type="number" step="any" data-v="${i}" value="${d.values[i]}" aria-label="ค่า ${i + 1}">
-            <button class="icon-btn sm" data-del="${i}" title="ลบแถว">${icon('trash', 16)}</button>
-          </div>`).join('')}</div>
-        <div class="row-gap"><button class="btn sm" data-add>${icon('plus', 16)} เพิ่มข้อมูล</button>
+        <div class="cp-title">ข้อมูล ${multi ? '(แต่ละคอลัมน์คือ 1 ชุดข้อมูล)' : ''}</div>
+        <div class="tbl-wrap"><table class="tbl-edit data-grid">
+          <tr><th>ชื่อ</th>${series.map((s, si) => `<th><span class="dot" style="background:${d.colors[si % d.colors.length]}"></span><input class="input" data-sn="${si}" value="${esc(s.name)}" aria-label="ชื่อชุดข้อมูล ${si + 1}">${multi && series.length > 1 ? `<button class="icon-btn sm" data-sdel="${si}" title="ลบชุดข้อมูล">${icon('close', 14)}</button>` : ''}</th>`).join('')}<th></th></tr>
+          ${d.labels.map((l, i) => `<tr class="data-row">
+            <td><span class="dot" style="background:${multi ? 'transparent' : d.colors[i % d.colors.length]}"></span><input class="input" data-l="${i}" value="${esc(l)}" aria-label="ชื่อข้อมูล ${i + 1}"></td>
+            ${series.map((s, si) => `<td><input class="input" type="number" step="any" data-v="${si}:${i}" value="${s.values[i] ?? 0}" aria-label="ค่า ${si + 1}-${i + 1}"></td>`).join('')}
+            <td><button class="icon-btn sm" data-del="${i}" title="ลบแถว">${icon('trash', 16)}</button></td></tr>`).join('')}
+        </table></div>
+        <div class="row-gap"><button class="btn sm" data-add>${icon('plus', 16)} เพิ่มแถว</button>
+        ${multi ? `<button class="btn sm" data-sadd>${icon('plus', 16)} เพิ่มชุดข้อมูล</button>` : ''}
         <button class="btn sm" data-import-toggle>${icon('upload', 16)} นำเข้าจาก CSV / Excel</button></div>
         <div class="import-box" data-import hidden>
-          <p class="hint">วางข้อมูลที่คัดลอกจาก Excel / Google Sheets (คอลัมน์แรก = ชื่อ, คอลัมน์สอง = ตัวเลข) หรือเลือกไฟล์ .csv</p>
-          <textarea class="input full code" rows="4" data-paste placeholder="ม.ค.	12&#10;ก.พ.	19"></textarea>
+          <p class="hint">วางข้อมูลจาก Excel / Google Sheets: คอลัมน์แรก = ชื่อ, คอลัมน์ถัดไป = ตัวเลข (หลายคอลัมน์ = หลายชุดข้อมูล, แถวแรกเป็นหัวตารางได้) หรือเลือกไฟล์ .csv</p>
+          <textarea class="input full code" rows="4" data-paste placeholder="เดือน&#9;ปี 68&#9;ปี 69&#10;ม.ค.&#9;12&#9;9"></textarea>
           <div class="row-gap"><input type="file" accept=".csv,.tsv,.txt,text/csv" data-csv-file><button class="btn sm primary" data-import-go>ใช้ข้อมูลนี้</button></div>
         </div>
         <div class="modal-actions"><button class="btn" data-no>ยกเลิก</button><button class="btn primary" data-go>ใช้การเปลี่ยนแปลง</button></div>`;
     };
     const read = () => {
       box.querySelectorAll('[data-l]').forEach((i) => { d.labels[+i.dataset.l] = i.value; });
-      box.querySelectorAll('[data-v]').forEach((i) => { d.values[+i.dataset.v] = +i.value || 0; });
+      box.querySelectorAll('[data-sn]').forEach((i) => { series[+i.dataset.sn].name = i.value; });
+      box.querySelectorAll('[data-v]').forEach((i) => { const [si, r] = i.dataset.v.split(':').map(Number); series[si].values[r] = +i.value || 0; });
       box.querySelectorAll('[data-o]').forEach((i) => { d[i.dataset.o] = i.type === 'checkbox' ? i.checked : i.value; });
     };
+    const finish = () => {
+      d.values = series[0].values.slice(0, d.labels.length);
+      if (MULTI_TYPES.includes(d.chart)) d.series = series.map((x) => ({ name: x.name, values: x.values.slice(0, d.labels.length) }));
+      else delete d.series;
+    };
     render();
+    box.addEventListener('change', (e) => {
+      if (e.target.matches('[data-o="chart"]')) {
+        read();
+        const was = series.length;
+        d.chart = e.target.value;
+        if (MULTI_TYPES.includes(d.chart) && was < 2) series.push({ name: 'ชุดที่ 2', values: series[0].values.map((v) => Math.round(v * 0.8)) });
+        render();
+      }
+    });
     box.addEventListener('click', async (e) => {
       const t = e.target;
       if (t.closest('[data-pal]')) { read(); d.colors = PALETTES[+t.closest('[data-pal]').dataset.pal]; return render(); }
-      if (t.closest('[data-add]')) { read(); d.labels.push(`ข้อมูล ${d.labels.length + 1}`); d.values.push(10); return render(); }
+      if (t.closest('[data-add]')) { read(); d.labels.push(`ข้อมูล ${d.labels.length + 1}`); series.forEach((x) => x.values.push(10)); return render(); }
+      if (t.closest('[data-sadd]')) { read(); series.push({ name: `ชุดที่ ${series.length + 1}`, values: d.labels.map(() => 10) }); return render(); }
+      if (t.closest('[data-sdel]')) { read(); series.splice(+t.closest('[data-sdel]').dataset.sdel, 1); return render(); }
+      if (t.closest('[data-del]')) {
+        read();
+        if (d.labels.length <= 1) return toast('กราฟต้องมีข้อมูลอย่างน้อย 1 แถว', 'error');
+        const i = +t.closest('[data-del]').dataset.del;
+        d.labels.splice(i, 1);
+        series.forEach((x) => x.values.splice(i, 1));
+        return render();
+      }
       if (t.closest('[data-import-toggle]')) { box.querySelector('[data-import]').hidden = !box.querySelector('[data-import]').hidden; return; }
       if (t.closest('[data-import-go]')) {
         read();
         const f = box.querySelector('[data-csv-file]').files[0];
         const text = f ? await f.text() : box.querySelector('[data-paste]').value;
-        const { labels, values } = rowsToSeries(parseDelimited(text));
-        if (!labels.length) return toast('ไม่พบข้อมูลที่ใช้ได้ (ต้องมีคอลัมน์ชื่อ และคอลัมน์ตัวเลข)', 'error');
-        d.labels = labels; d.values = values;
-        toast(`นำเข้า ${labels.length} แถวแล้ว`, 'ok');
-        return render();
-      }
-      if (t.closest('[data-del]')) {
-        read();
-        if (d.labels.length <= 1) return toast('กราฟต้องมีข้อมูลอย่างน้อย 1 แถว', 'error');
-        const i = +t.closest('[data-del]').dataset.del;
-        d.labels.splice(i, 1); d.values.splice(i, 1);
+        const data = rowsToData(parseDelimited(text));
+        if (!data) return toast('ไม่พบข้อมูลที่ใช้ได้ (ต้องมีคอลัมน์ชื่อ และคอลัมน์ตัวเลข)', 'error');
+        d.labels = data.labels;
+        series = data.series;
+        if (series.length > 1 && !MULTI_TYPES.includes(d.chart)) d.chart = d.chart.startsWith('hbar') ? 'hbar-group' : d.chart.startsWith('line') ? 'line-multi' : d.chart.startsWith('area') ? 'area-stack' : 'bar-group';
+        toast(`นำเข้า ${data.labels.length} แถว × ${series.length} ชุดข้อมูล`, 'ok');
         return render();
       }
       if (t.closest('[data-no]')) return m.close();
-      if (t.closest('[data-go]')) { read(); m.close(); await this.rebuildSmart(obj, d); }
+      if (t.closest('[data-go]')) { read(); finish(); m.close(); await this.rebuildSmart(obj, d); }
     });
   },
 

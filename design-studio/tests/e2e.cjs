@@ -553,7 +553,7 @@ function meanDiff(a, b) {
     await page.selectOption('[data-o="chart"]', 'bar');
     await page.click('[data-add]');
     await page.fill('[data-l="5"]', 'มิ.ย.');
-    await page.fill('[data-v="5"]', '30');
+    await page.fill('[data-v="0:5"]', '30');
     await page.click('[data-del="0"]');
     await page.click('[data-pal="2"]');
     await page.fill('[data-o="title"]', 'คะแนนสอบ');
@@ -621,6 +621,56 @@ function meanDiff(a, b) {
     const w1 = await ev(() => Math.round(__lai.canvas.getActiveObject().getScaledWidth()));
     assert(Math.abs(w1 - w0) <= 2 && (await objCount()) === n0 + n, `size ${w0}->${w1}`);
     await ev(() => { const c = __lai.canvas; c.discardActiveObject(); c.remove(...c.getObjects().filter((o) => o.smart?.type === 'icon')); __lai.commit(); });
+  });
+  await step('[D2] กราฟ 32 แบบ: สร้างได้ทุกแบบ ไม่มี error และอยู่ในกรอบของตัวเอง', async () => {
+    const keys = await page.$$eval('.smart-grid.charts [data-act]', (e) => e.map((x) => x.dataset.act));
+    assert(keys.length >= 30, 'chart types ' + keys.length);
+    const n0 = await objCount();
+    for (const k of keys) {
+      const before = await objCount();
+      await page.click(`[data-act="${k}"]`);
+      await page.waitForFunction((b) => __lai.canvas.getObjects().length === b + 1, before);
+    }
+    const bad = await ev((n0) => __lai.canvas.getObjects().slice(n0).filter((g) => {
+      const d = g.smart; const W = d.width, H = d.height;
+      return g.getObjects().some((o) => { const b = o.getBoundingRect(); const gb = g.getBoundingRect(); return b.width > gb.width + 2 || b.height > gb.height + 2; });
+    }).map((g) => g.smart.chart), n0);
+    assert(!bad.length, 'overflow: ' + bad);
+    await ev((n0) => { const c = __lai.canvas; c.remove(...c.getObjects().slice(n0)); __lai.commit(); }, n0);
+  });
+  await step('[D2] กราฟหลายชุดข้อมูล: เพิ่ม/ลบชุด เปลี่ยนชนิด นำเข้า CSV หลายคอลัมน์ บันทึก-โหลดได้', async () => {
+    await page.click('[data-act="smart:bar-group"]');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.chart === 'bar-group');
+    await page.click('[data-act="smart-edit"]');
+    await page.click('[data-sadd]');
+    assert((await page.$$eval('[data-sn]', (e) => e.length)) === 3, 'add series');
+    await page.fill('[data-sn="2"]', 'ปี 2570');
+    await page.fill('[data-v="2:0"]', '33');
+    await page.selectOption('[data-o="chart"]', 'line-smooth');
+    await page.click('[data-go]');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.chart === 'line-smooth');
+    let d = await ev(() => __lai.canvas.getActiveObject().smart);
+    assert(d.series.length === 3 && d.series[2].name === 'ปี 2570' && d.series[2].values[0] === 33, JSON.stringify(d.series));
+    await page.click('[data-act="smart-edit"]');
+    await page.click('[data-import-toggle]');
+    await page.fill('[data-paste]', 'ภาค\tชาย\tหญิง\tรวม\nเหนือ\t10\t12\t22\nใต้\t8\t9\t17\nอีสาน\t15\t14\t29');
+    await page.click('[data-import-go]');
+    await page.selectOption('[data-o="chart"]', 'bar-stack');
+    await page.click('[data-go]');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.chart === 'bar-stack');
+    d = await ev(() => __lai.canvas.getActiveObject().smart);
+    assert(d.labels.join() === 'เหนือ,ใต้,อีสาน' && d.series.map((x) => x.name).join() === 'ชาย,หญิง,รวม' && d.series[1].values.join() === '12,9,14', JSON.stringify(d));
+    // switching to a single-series type keeps the first series only
+    await page.click('[data-act="smart-edit"]');
+    await page.selectOption('[data-o="chart"]', 'pie');
+    await page.click('[data-go]');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.chart === 'pie');
+    d = await ev(() => __lai.canvas.getActiveObject().smart);
+    assert(!d.series && d.values.join() === '10,8,15', JSON.stringify(d));
+    await ev(() => __lai.commit());
+    await ev(() => __lai.loadPage(__lai.cur));
+    await wait(400);
+    assert(await ev(() => __lai.canvas.getObjects().some((o) => o.smart?.chart === 'pie')), 'reload');
   });
   await step('QR Code: เพิ่ม แก้ลิงก์ สี พื้นโปร่งใส', async () => {
     await page.click('[data-act="smart:qr"]');

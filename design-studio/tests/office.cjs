@@ -97,6 +97,7 @@ const decodeXml = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/
 const SAMPLES = [
   { key: 'mixed', preset: 0, title: 'ทุกองค์ประกอบ (IG 1080×1080)', build: 'mixed' },
   { key: 'a4', preset: 6, title: 'เอกสาร A4: ใบงาน + ประกาศ + เกียรติบัตร', build: ['tpl:2', 'tpl:6', 'tpl:3'] },
+  { key: 'charts', preset: 5, title: 'กราฟหลายชุดข้อมูล 16:9 (แท่งกลุ่ม แท่งซ้อน แท่งซ้อน 100% แนวนอน เส้น เส้นโค้ง พื้นที่ซ้อน เรดาร์)', build: 'charts' },
   { key: 'slides', preset: 5, title: 'สไลด์ 16:9: หน้าแรก + เชิญร่วมงาน + โปรโมชัน + เมนู', build: ['tpl:7', 'tpl:5', 'tpl:0', 'tpl:9'] },
 ];
 
@@ -177,6 +178,26 @@ const SAMPLES = [
         L.canvas.requestRenderAll();
         L.commit();
       }, null);
+    } else if (S.build === 'charts') {
+      await ev(async () => {
+        const L = __lai;
+        const pages = [['bar-group', 'bar-stack', 'bar-stack100', 'hbar-group'], ['hbar-stack', 'line-multi', 'line-smooth', 'area-stack'], ['radar']];
+        for (let p = 0; p < pages.length; p++) {
+          if (p > 0) await L.addPage();
+          const list = pages[p];
+          for (let i = 0; i < list.length; i++) {
+            await L.addSmart(list[i]);
+            const o = L.canvas.getActiveObject();
+            const k = list.length === 1 ? 1.25 : 0.62;
+            o.set({ scaleX: k, scaleY: k });
+            const cx = list.length === 1 ? L.W / 2 : (i % 2 ? 0.74 : 0.26) * L.W, cy = list.length === 1 ? L.H / 2 : (i < 2 ? 0.27 : 0.75) * L.H;
+            o.setPositionByOrigin({ x: cx, y: cy }, 'center', 'center');
+            o.setCoords();
+          }
+          L.canvas.discardActiveObject();
+          L.commit();
+        }
+      });
     } else {
       for (let i = 0; i < S.build.length; i++) {
         if (i > 0) { await page.click('[data-act="page-add"]'); await page.waitForTimeout(300); }
@@ -207,8 +228,8 @@ const SAMPLES = [
           }
           if (o.shapeText) { const t = o.objects[1].text; ps.pptx.push(t); ps.docx.push(t); }
           if (o.smart?.type === 'table') o.smart.rows.flat().filter((c) => String(c).trim()).forEach((c) => { ps.pptx.push(String(c)); ps.docx.push(String(c)); });
-          if (o.smart?.type === 'chart' && ['bar', 'hbar', 'line', 'area', 'pie', 'donut'].includes(o.smart.chart)) {
-            [o.smart.title, ...o.smart.labels].filter(Boolean).forEach((c) => { ps.pptx.push(String(c)); ps.docx.push(String(c)); });
+          if (o.smart?.type === 'chart' && ['bar', 'hbar', 'line', 'area', 'pie', 'donut', 'bar-group', 'bar-stack', 'bar-stack100', 'hbar-group', 'hbar-stack', 'line-multi', 'line-smooth', 'area-stack', 'radar'].includes(o.smart.chart)) {
+            [o.smart.title, ...o.smart.labels, ...((o.smart.series && o.smart.series.length > 1) ? o.smart.series.map((x) => x.name) : [])].filter(Boolean).forEach((c) => { ps.pptx.push(String(c)); ps.docx.push(String(c)); });
           }
         }
         out.pptx.push(ps.pptx);
@@ -224,7 +245,7 @@ const SAMPLES = [
     const W = 900, H = Math.round((900 * (await ev(() => __lai.H))) / (await ev(() => __lai.W)));
     const refImgs = renderPdf(ref, path.join(OUT, `${base}-ref`), W, H);
     // native chart areas per page (scaled to the comparison size)
-    const chartBoxes = await ev((W) => { const k = W / __lai.W; return __lai.design.pages.filter((p) => !p.hidden).map((p) => (JSON.parse(p.json).objects || []).filter((o) => o.smart?.type === 'chart' && ['bar', 'hbar', 'line', 'area', 'pie', 'donut'].includes(o.smart.chart)).map((o) => { const w = o.width * o.scaleX, h = o.height * o.scaleY; const cx = o.left + (o.originX === 'center' ? 0 : w / 2), cy = o.top + (o.originY === 'center' ? 0 : h / 2); return { x: (cx - w / 2) * k, y: (cy - h / 2) * k, w: w * k, h: h * k }; })); }, W);
+    const chartBoxes = await ev((W) => { const k = W / __lai.W; return __lai.design.pages.filter((p) => !p.hidden).map((p) => (JSON.parse(p.json).objects || []).filter((o) => o.smart?.type === 'chart' && ['bar', 'hbar', 'line', 'area', 'pie', 'donut', 'bar-group', 'bar-stack', 'bar-stack100', 'hbar-group', 'hbar-stack', 'line-multi', 'line-smooth', 'area-stack', 'radar'].includes(o.smart.chart)).map((o) => { const w = o.width * o.scaleX, h = o.height * o.scaleY; const cx = o.left + (o.originX === 'center' ? 0 : w / 2), cy = o.top + (o.originY === 'center' ? 0 : h / 2); return { x: (cx - w / 2) * k, y: (cy - h / 2) * k, w: w * k, h: h * k }; })); }, W);
     const row = { sample: S.title, pages: nPages };
 
     for (const fmt of ['pptx', 'docx']) {
@@ -263,8 +284,14 @@ const SAMPLES = [
         const all = xmls.join('');
         const missing = fonts.filter((f) => !all.includes(`"${f}"`) && !charts.join('').includes(`"${f}"`));
         assert(!missing.length, 'ไม่พบฟอนต์: ' + missing.join(', '));
-        if (fmt === 'docx') assert(/w:cs="[^"]+"/.test(all), 'ไม่มีฟอนต์ complex script สำหรับภาษาไทย');
-        else assert(/<a:cs typeface=/.test(all), 'ไม่มีฟอนต์ cs');
+        if (/[ก-๙]/.test(all.replace(/<[^>]+>/g, ''))) {
+          if (fmt === 'docx') assert(/w:cs="[^"]+"/.test(all), 'ไม่มีฟอนต์ complex script สำหรับภาษาไทย');
+          else assert(/<a:cs typeface=/.test(all), 'ไม่มีฟอนต์ cs');
+        }
+        // Thai chart labels need a complex-script font too
+        for (const c of charts) {
+          for (const m of c.matchAll(/<a:latin typeface="([^"]+)"[^>]*\/>/g)) assert(c.includes(`<a:cs typeface="${m[1]}"/>`), `กราฟไม่มีฟอนต์ภาษาไทย (cs) สำหรับ ${m[1]}`);
+        }
         return fonts.join(', ');
       });
 
@@ -272,7 +299,7 @@ const SAMPLES = [
         const all = xmls.join('');
         const nTables = (all.match(fmt === 'pptx' ? /<a:tbl>/g : /<w:tbl>/g) || []).length;
         const wantTables = await ev(() => __lai.design.pages.filter((p) => !p.hidden).reduce((n, p) => n + (JSON.parse(p.json).objects || []).filter((o) => o.smart?.type === 'table').length, 0));
-        const wantCharts = await ev(() => __lai.design.pages.filter((p) => !p.hidden).reduce((n, p) => n + (JSON.parse(p.json).objects || []).filter((o) => o.smart?.type === 'chart' && ['bar', 'hbar', 'line', 'area', 'pie', 'donut'].includes(o.smart.chart)).length, 0));
+        const wantCharts = await ev(() => __lai.design.pages.filter((p) => !p.hidden).reduce((n, p) => n + (JSON.parse(p.json).objects || []).filter((o) => o.smart?.type === 'chart' && ['bar', 'hbar', 'line', 'area', 'pie', 'donut', 'bar-group', 'bar-stack', 'bar-stack100', 'hbar-group', 'hbar-stack', 'line-multi', 'line-smooth', 'area-stack', 'radar'].includes(o.smart.chart)).length, 0));
         assert(nTables === wantTables, `ตาราง ${nTables}/${wantTables}`);
         assert(charts.length === wantCharts, `กราฟ ${charts.length}/${wantCharts}`);
         const shapes = fmt === 'pptx' ? (all.match(/<a:prstGeom prst="(rect|roundRect|ellipse|triangle|line)"|<a:custGeom>/g) || []).length : 0;

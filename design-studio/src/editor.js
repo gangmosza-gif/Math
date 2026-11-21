@@ -16,7 +16,11 @@ import { Vignette, warmthMatrix, tintMatrix, duotoneMatrix, sharpen } from './fi
 import { fileToDataURL } from './imageutil.js';
 import { features, SMART_LABEL } from './features.js';
 import { rulers } from './rulers.js';
-import { FRAMES, GRIDS, MOCKUPS } from './smart.js';
+import { FRAMES, GRIDS, MOCKUPS, CHART_TYPES } from './smart.js';
+
+const CHART_ICON = { bar: '📊', 'bar-group': '📊', 'bar-stack': '▥', 'bar-stack100': '▥', hbar: '☰', 'hbar-group': '☰', 'hbar-stack': '☰', waterfall: '⛲', lollipop: '🍭',
+  line: '📈', 'line-multi': '📈', 'line-smooth': '〰', step: '⌐', area: '◭', 'area-stack': '◭', pie: '◔', donut: '◎', halfdonut: '◠', polar: '✿', radial: '◉',
+  radar: '🕸', scatter: '⁘', bubble: '⚬', heatmap: '▦', funnel: '⏷', treemap: '▤', dotplot: '•', progress: '▰', ring: '◌', pictogram: '👥', gauge: '⏲', stat: '🔢' };
 
 export { fileToDataURL };
 
@@ -1864,11 +1868,14 @@ export class Editor {
     } else if (p === 'elements') {
       body.innerHTML = `
         <input class="input full search" data-el-search placeholder="ค้นหาองค์ประกอบ เช่น ดาว, ตาราง, กราฟ" aria-label="ค้นหาองค์ประกอบ" />
-        <div class="sec-title">ตาราง กราฟ และอื่น ๆ</div>
+        <div class="sec-title">ตาราง QR สมการ</div>
         <div class="smart-grid">
-          ${[['table', '▦', 'ตาราง'], ['bar', '📊', 'กราฟแท่ง'], ['hbar', '☰', 'กราฟแท่งแนวนอน'], ['line', '📈', 'กราฟเส้น'], ['area', '◭', 'กราฟพื้นที่'], ['pie', '◔', 'กราฟวงกลม'], ['donut', '◎', 'กราฟโดนัท'],
-              ['progress', '▰', 'แถบความคืบหน้า อินโฟกราฟิก'], ['ring', '◌', 'วงแหวนความคืบหน้า อินโฟกราฟิก'], ['pictogram', '👥', 'ภาพสัญลักษณ์ อินโฟกราฟิก'], ['qr', '▣', 'QR Code'], ['equation', '∑', 'สมการ']]
+          ${[['table', '▦', 'ตาราง'], ['qr', '▣', 'QR Code'], ['equation', '∑', 'สมการ']]
             .map(([k, ic, l]) => `<button class="smart-btn" data-act="smart:${k}" title="${l}"><b>${ic}</b><span>${l}</span></button>`).join('')}
+        </div>
+        <div class="sec-title">กราฟ (${CHART_TYPES.length} แบบ)</div>
+        <div class="smart-grid charts">
+          ${CHART_TYPES.map(([k, l, g]) => `<button class="smart-btn" data-act="smart:${k}" title="กราฟ ${l} ${g}"><b>${CHART_ICON[k] || '📊'}</b><span>${l}</span></button>`).join('')}
         </div>
         <div class="sec-title">ไอคอน</div>
         <div class="el-grid icons">${LIBRARY_ICONS.map(([n, l]) => `<button class="el" data-act="smart:icon-${n}" title="ไอคอน ${l}">${icon(n, 26)}</button>`).join('')}</div>

@@ -5,7 +5,10 @@ import { Point } from 'fabric';
 import { renderPage } from './export.js';
 
 const isText = (o) => o && (o.type === 'textbox' || o.type === 'itext' || o.type === 'text');
-const NATIVE_CHARTS = ['bar', 'hbar', 'line', 'area', 'pie', 'donut'];
+import { seriesOf, niceScale } from './charts.js';
+
+// chart types PowerPoint / Word can draw natively (the rest are exported as pictures)
+export const NATIVE_CHARTS = ['bar', 'hbar', 'line', 'area', 'pie', 'donut', 'bar-group', 'bar-stack', 'bar-stack100', 'hbar-group', 'hbar-stack', 'line-multi', 'line-smooth', 'area-stack', 'radar'];
 const FONT_SIZE_MULT = 1.13; // fabric line box = fontSize * lineHeight * 1.13
 
 // ---------------------------------------------------------------- colour helpers
@@ -156,7 +159,9 @@ function chartItem(g) {
   const fs = Math.max(10, Math.round(Math.min(d.width, d.height) * 0.055)) * sc;
   return {
     kind: 'chart', chart: d.chart, ...b, title: d.title, labels: d.labels.map(String), values: d.values.map((v) => +v || 0),
-    colors: d.labels.map((_, i) => parseColor(d.colors[i % d.colors.length])?.hex || '7C5CFF'),
+    series: seriesOf(d), multi: !!(d.series && d.series.length > 1) || ['radar'].includes(d.chart),
+    axisMax: (() => { const all = seriesOf(d).flatMap((x) => x.values); const stack = d.chart.includes('stack'); const hi = stack ? Math.max(...d.labels.map((_, j) => seriesOf(d).reduce((a, x) => a + Math.max(0, x.values[j]), 0))) : Math.max(1, ...all); return niceScale(Math.min(0, ...all), hi).max; })(),
+    colors: Array.from({ length: Math.max(d.labels.length, (d.series || []).length) }, (_, i) => parseColor(d.colors[i % d.colors.length])?.hex || '7C5CFF'),
     showValues: d.showValues, fontFamily: d.fontFamily, color: parseColor(d.color)?.hex || '1F2333', fontSize: fs,
   };
 }
@@ -235,6 +240,23 @@ export function inchPerPx(design) {
 }
 
 const b64 = (dataURL) => dataURL.replace(/^data:/, '');
+
+/**
+ * Chart XML from both libraries only names the Latin font, so Office would draw Thai labels in its
+ * default complex-script font (Tahoma). Add the same font as East-Asian and complex-script font.
+ */
+async function fixChartFonts(blob) {
+  const { default: JSZip } = await import('jszip');
+  const zip = await JSZip.loadAsync(blob);
+  const charts = Object.keys(zip.files).filter((f) => /charts\/chart\d+\.xml$/.test(f));
+  if (!charts.length) return blob;
+  for (const f of charts) {
+    let x = await zip.file(f).async('string');
+    x = x.replace(/<a:latin typeface="([^"]+)"([^>]*)\/>(?!<a:ea)/g, (m, face, rest) => `<a:latin typeface="${face}"${rest}/><a:ea typeface="${face}"/><a:cs typeface="${face}"/>`);
+    zip.file(f, x);
+  }
+  return zip.generateAsync({ type: 'blob', mimeType: blob.type || undefined });
+}
 const lineSpacingPt = (it, fontPx, toPt) => toPt(fontPx * it.scale) * it.lineHeight * FONT_SIZE_MULT;
 // Office puts the extra leading of an exact line spacing above the first line; fabric does not.
 // Measured with LibreOffice for 10 fonts and several sizes / line heights (error ≤ 2 px):
@@ -345,7 +367,7 @@ export async function buildPptx(design, pages, onProgress = () => {}) {
     if (pg.notes) slide.addNotes(pg.notes);
   }
   onProgress(pages.length, pages.length);
-  return pptx.write({ outputType: 'blob' });
+  return fixChartFonts(await pptx.write({ outputType: 'blob' }));
 }
 
 function addPptxChart(pptx, slide, it, I, PT) {
@@ -365,10 +387,24 @@ function addPptxChart(pptx, slide, it, I, PT) {
   } else if (it.chart === 'bar' || it.chart === 'hbar') {
     // one series per category, stacked, so every bar keeps its own colour (as in the design)
     const data = it.labels.map((l, i) => ({ name: l, labels: it.labels, values: it.values.map((v, j) => (j === i ? v : 0)) }));
-    slide.addChart(pptx.ChartType.bar, data, { ...base, valAxisMaxVal: Math.max(1, ...it.values), valAxisMinVal: 0, barDir: it.chart === 'hbar' ? 'bar' : 'col', barGrouping: 'clustered', barOverlapPct: 100, chartColors: it.colors, showLegend: false, barGapWidthPct: 60, dataLabelFormatCode: '#,##0.##;;;', dataLabelPosition: 'outEnd' });
+    slide.addChart(pptx.ChartType.bar, data, { ...base, valAxisMaxVal: it.axisMax, valAxisMinVal: 0, barDir: it.chart === 'hbar' ? 'bar' : 'col', catAxisOrientation: it.chart === 'hbar' ? 'maxMin' : 'minMax', barGrouping: 'clustered', barOverlapPct: 100, chartColors: it.colors, showLegend: false, barGapWidthPct: 60, dataLabelFormatCode: '#,##0.##;;;', dataLabelPosition: 'outEnd' });
+  } else if (it.multi) {
+    // several series: legend on top, one colour per series (as in the design)
+    const data = it.series.map((x) => ({ name: x.name, labels: it.labels, values: x.values }));
+    const legend = { showLegend: true, legendPos: 't' };
+    const k = it.chart;
+    if (k.startsWith('bar') || k.startsWith('hbar')) {
+      slide.addChart(pptx.ChartType.bar, data, { ...base, ...legend, chartColors: it.colors, barDir: k.startsWith('hbar') ? 'bar' : 'col', catAxisOrientation: k.startsWith('hbar') ? 'maxMin' : 'minMax', valAxisLabelFormatCode: k.endsWith('stack100') ? '0%' : undefined, barGrouping: k.endsWith('stack100') ? 'percentStacked' : k.includes('stack') ? 'stacked' : 'clustered', barOverlapPct: k.includes('stack') ? 100 : undefined, barGapWidthPct: 60, valAxisMinVal: 0, valAxisMaxVal: k.endsWith('stack100') ? undefined : it.axisMax, dataLabelPosition: k.includes('stack') ? 'ctr' : 'outEnd', dataLabelColor: k.includes('stack') ? 'FFFFFF' : it.color });
+    } else if (k === 'radar') {
+      slide.addChart(pptx.ChartType.radar, data, { ...base, ...legend, chartColors: it.colors, radarStyle: 'marker', showValue: false });
+    } else if (k === 'area-stack') {
+      slide.addChart(pptx.ChartType.area, data, { ...base, ...legend, chartColors: it.colors, barGrouping: 'stacked', showValue: false, valAxisMinVal: 0, valAxisMaxVal: it.axisMax });
+    } else {
+      slide.addChart(pptx.ChartType.line, data, { ...base, ...legend, chartColors: it.colors, lineSize: 3, lineDataSymbol: 'circle', lineDataSymbolSize: 7, lineSmooth: k === 'line-smooth', showValue: false, valAxisMinVal: 0, valAxisMaxVal: it.axisMax });
+    }
   } else {
     slide.addChart(it.chart === 'area' ? pptx.ChartType.area : pptx.ChartType.line, [{ name: it.title || 'ข้อมูล', labels: it.labels, values: it.values }], {
-      ...base, chartColors: [it.colors[0]], showLegend: false, lineSize: 3, lineDataSymbol: 'circle', lineDataSymbolSize: 8, dataLabelPosition: 't',
+      ...base, chartColors: [it.colors[0]], showLegend: false, lineSize: 3, lineDataSymbol: 'circle', lineDataSymbolSize: 8, dataLabelPosition: 't', valAxisMinVal: 0, valAxisMaxVal: it.axisMax,
     });
   }
 }
@@ -468,12 +504,26 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
         dataLabels: it.showValues ? { percentage: true, font: { ...fontOpt, color: 'FFFFFF', size: +(PT(it.fontSize) * 0.85).toFixed(1), bold: true } } : undefined,
       });
     }
+    const fsz = (k) => +(PT(it.fontSize) * k).toFixed(1);
+    if (it.multi) {
+      const k = it.chart;
+      const legend = { position: 'top', font: { ...fontOpt, size: fsz(0.85) } };
+      if (k === 'radar') return new ChartRun({ ...common, type: 'radar', categories: it.labels, legend, series: it.series.map((x, i) => ({ name: x.name, values: x.values, color: it.colors[i] })) });
+      const type = k.startsWith('hbar') ? 'bar' : k.startsWith('bar') ? 'column' : k.startsWith('area') ? 'area' : 'line';
+      const stacking = k.endsWith('stack100') ? 'percent' : k.includes('stack') ? 'stacked' : 'none';
+      return new ChartRun({
+        ...common, type, categories: it.labels, legend, stacking,
+        series: it.series.map((x, i) => ({ name: x.name, values: x.values, color: it.colors[i], ...(k === 'line-smooth' ? { smooth: true } : {}) })),
+        dataLabels: it.showValues && (type === 'column' || type === 'bar') ? { value: true, font: { ...fontOpt, size: fsz(0.7), bold: true } } : undefined,
+        categoryAxis: { font: { ...fontOpt, size: fsz(0.85) }, reverseOrder: type === 'bar' }, valueAxis: { font: { ...fontOpt, size: fsz(0.8) }, ...(stacking === 'percent' ? { numberFormat: '0%' } : { minimum: 0, maximum: it.axisMax }) },
+      });
+    }
     const type = { bar: 'column', hbar: 'bar', line: 'line', area: 'area' }[it.chart];
     return new ChartRun({
       ...common, type, categories: it.labels, legend: false,
       series: [{ name: it.title || 'ข้อมูล', values: it.values, ...(type === 'column' || type === 'bar' ? { colors: it.colors } : { color: it.colors[0] }) }],
       dataLabels: it.showValues ? { value: true, font: { ...fontOpt, size: +(PT(it.fontSize) * 0.85).toFixed(1), bold: true } } : undefined,
-      categoryAxis: { font: { ...fontOpt, size: +(PT(it.fontSize) * 0.85).toFixed(1) } }, valueAxis: { font: { ...fontOpt, size: +(PT(it.fontSize) * 0.8).toFixed(1) } },
+      categoryAxis: { font: { ...fontOpt, size: fsz(0.85) }, reverseOrder: type === 'bar' }, valueAxis: { font: { ...fontOpt, size: fsz(0.8) }, minimum: 0, maximum: it.axisMax },
     });
   };
 
@@ -527,5 +577,5 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
     styles: { default: { document: { run: { font: font('Sarabun'), language: { value: 'th-TH', bidirectional: 'th-TH' } } } } },
     sections,
   });
-  return D.Packer.toBlob(doc);
+  return fixChartFonts(await D.Packer.toBlob(doc));
 }
