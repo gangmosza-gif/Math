@@ -24,6 +24,8 @@ Skip an item when its file already exists in `design-studio/illustrations/inbox/
    (except the single digit in `batch-27` number items), the subject is cut off at the edge, the number of people/objects is
    wrong, hands or faces are deformed, or it does not match the subject.
 5. Save it as `design-studio/illustrations/inbox/<batch>/<file>` — exact file name, nothing else in that folder.
+   (If an image arrives as `.jpg`/`.webp` or with different letter case, the checker renames and converts it to the
+   expected `.png` name automatically — but always aim for the exact name.)
 6. Commit with message `illustration: <file>` and push. One image per commit (or one batch per commit).
 
 ## Do NOT

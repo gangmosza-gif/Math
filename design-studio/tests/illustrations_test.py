@@ -121,5 +121,21 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'import_illustrations.py'), batch, '--out', out], capture_output=True, text=True)
     check(len(json.load(open(os.path.join(out, 'manifest.json')))['items']) == 6, 'นำเข้าซ้ำไม่เกิดรายการซ้ำ')
 
+print('ชื่อไฟล์และไฟล์แปลก ๆ')
+with tempfile.TemporaryDirectory() as tmp:
+    batch = os.path.join(tmp, 'batch-01')
+    os.makedirs(batch)
+    doodle().save(os.path.join(batch, 'S1-STUDENTS-BOY-WAVING.PNG'))                     # right image, upper-case name
+    doodle(bg=(255, 255, 255, 255)).convert('CMYK').save(os.path.join(batch, 's1-students-girl-reading.jpg'), 'JPEG')  # CMYK jpg
+    open(os.path.join(batch, 's1-students-girl-writing.png'), 'wb').write(b'\x89PNG\r\n\x1a\n' + b'x' * 50)  # corrupted
+    open(os.path.join(batch, 's1-students-boy-backpack.png'), 'wb').write(b'')       # empty file
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools/check_illustrations.py'), batch], capture_output=True, text=True)
+    check(r.returncode == 0, 'ไฟล์เสีย/ไฟล์ว่าง ไม่ทำให้ตัวตรวจพัง')
+    res = json.load(open(os.path.join(batch, '_check', 'results.json')))['results']
+    check(res.get('s1-students-boy-waving.png', {}).get('status') == 'ok' and 'S1-STUDENTS-BOY-WAVING.PNG' not in res, 'ชื่อไฟล์ตัวพิมพ์ใหญ่ → เปลี่ยนเป็นชื่อที่ถูกให้ และผ่าน')
+    g = res.get('s1-students-girl-reading.png', {})
+    check(g.get('status') in ('ok', 'fix') and any(m['code'] == 'renamed' for m in g.get('issues', [])), 'ไฟล์ .jpg (CMYK) → แปลงเป็น .png ให้ และตรวจต่อได้')
+    check(all(res.get(f, {}).get('status') == 'fail' for f in ('s1-students-girl-writing.png', 's1-students-boy-backpack.png')), 'ไฟล์เสีย/ไฟล์ว่าง → ไม่ผ่าน พร้อมเหตุผล')
+
 print(f'\n{ok}/{ok + fail} passed')
 sys.exit(1 if fail else 0)

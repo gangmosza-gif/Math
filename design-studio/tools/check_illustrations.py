@@ -228,11 +228,39 @@ def contact_sheet(batch, files, results, prompts, out):
     sheet.save(out)
 
 
+def normalise_names(batch, prompts):
+    """The right picture saved under the right name but another letter case or as .jpg/.jpeg/.webp:
+    rename it to the expected file name (converted to PNG) instead of rejecting a good image.
+    Returns {new name: old name}."""
+    by_stem = {os.path.splitext(k)[0].lower(): k for k in prompts}
+    done = {}
+    for f in sorted(os.listdir(batch)):
+        stem, ext = os.path.splitext(f)
+        if f in prompts or ext.lower() not in EXT or stem.lower() not in by_stem:
+            continue
+        want = by_stem[stem.lower()]
+        if os.path.exists(os.path.join(batch, want)):
+            continue  # the proper file is there too: leave this one to be reported
+        src = os.path.join(batch, f)
+        try:
+            im = Image.open(src)
+            im.load()
+            if im.mode not in ('RGB', 'RGBA'):
+                im = im.convert('RGBA')
+            im.save(os.path.join(batch, want), 'PNG')
+            os.remove(src)
+            done[want] = f
+        except Exception:
+            continue  # unreadable: the normal check reports it under its own name
+    return done
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__); sys.exit(2)
     batch = sys.argv[1].rstrip('/')
     prompts = load_prompts()
+    renamed = normalise_names(batch, prompts)
     files = sorted(f for f in os.listdir(batch) if f.lower().endswith(EXT))
     lib = {}
     if os.path.exists(LIB_MANIFEST):
@@ -244,6 +272,8 @@ def main():
             results[f] = {'status': 'fail', 'issues': [{'level': 'fail', 'code': 'unknown', 'msg': 'ชื่อไฟล์ไม่ตรงกับรายการคำสั่ง (ตั้งชื่อตามที่ระบุในชุดคำสั่ง)'}]}
             continue
         r, hsh = check(os.path.join(batch, f), meta, hashes)
+        if f in renamed:
+            r['issues'].insert(0, {'level': 'info', 'code': 'renamed', 'msg': f'เปลี่ยนชื่อไฟล์จาก {renamed[f]} เป็น {f} ให้แล้ว'})
         results[f] = r
         if hsh:
             hashes[f] = hsh
