@@ -1,6 +1,6 @@
 import {
   Canvas, Point, Textbox, FabricImage, ActiveSelection, Group, PencilBrush, Shadow,
-  Rect, Circle, Polygon, Path, Gradient, filters, util, InteractiveFabricObject, config,
+  Rect, Circle, Polygon, Path, Gradient, filters, util, InteractiveFabricObject, config, FabricText,
 } from 'fabric';
 import { icon, LIBRARY_ICONS } from './icons.js';
 import { esc, h, toast, modal, confirmDialog, popover, closePopover, currentPopoverId } from './ui.js';
@@ -12,6 +12,7 @@ export { safeURL };
 import { saveDesign, listUploads, saveUpload, deleteUpload, uid } from './storage.js';
 import { PRESETS } from './presets.js';
 import { PATTERNS, PHOTO_LIBRARY } from './patterns.js';
+import { docSettings, hasDoc, docDecorations, decorationObjects, decorationFonts, visibleNumber, PAGE_NUM_FORMATS, WATERMARK_PRESETS, BORDER_STYLES } from './docsetup.js';
 import { Vignette, warmthMatrix, tintMatrix, duotoneMatrix, sharpen } from './filters.js';
 import { fileToDataURL } from './imageutil.js';
 import { features, SMART_LABEL, BRAND_FONT_KINDS } from './features.js';
@@ -199,7 +200,7 @@ export class Editor {
     this.renderPages();
     this.openPanel(window.innerWidth < 760 ? null : 'templates');
     this.design.pages.forEach((p, i) => {
-      if (i !== this.cur) pageThumb(this.design, p.json, 200).then((u) => { this.thumbs.set(p.id, u); this.renderPages(); }).catch(() => {});
+      if (i !== this.cur) pageThumb(this.design, p, 200).then((u) => { this.thumbs.set(p.id, u); this.renderPages(); }).catch(() => {});
     });
     this.scheduleThumb(300);
     this.updateStatus('saved');
@@ -256,7 +257,7 @@ export class Editor {
       e.path.set({ name: this.drawSettings.mode === 'highlighter' ? 'ปากกาไฮไลต์' : 'ลายเส้น' });
       this.commit();
     });
-    c.on('after:render', ({ ctx }) => { this.drawMargins(ctx); this.drawUserGuides(ctx); this.drawGuides(ctx); });
+    c.on('after:render', ({ ctx }) => { this.drawDocDeco(ctx); this.drawMargins(ctx); this.drawUserGuides(ctx); this.drawGuides(ctx); });
     c.on('mouse:down', (e) => {
       if (e.e.button === 2) this.showContextMenu(e);
     });
@@ -431,6 +432,129 @@ export class Editor {
     if (this.panel === 'layers') this.renderPanel();
   }
 
+  // ---------------------------------------------------------------- document setup (header, footer, page numbers, watermark, border)
+  /** Rebuild the decoration objects of the current page when settings, page number or page count change. */
+  refreshDeco() {
+    if (!this.design || !this.canvas) return;
+    const num = visibleNumber(this.design, this.cur);
+    const on = hasDoc(this.design);
+    const key = on ? JSON.stringify([this.design.doc, num, this.W, this.H, this.design.mm]) : '';
+    if (key === this._decoKey) return;
+    this._decoKey = key;
+    if (!on) { this._deco = []; this.canvas.requestRenderAll(); return; }
+    const build = () => { this._deco = decorationObjects({ Rect, Text: FabricText, Textbox }, docDecorations(this.design, num.i, num.n)); this.canvas.requestRenderAll(); };
+    build();
+    Promise.race([ensureFonts(decorationFonts(this.design)), new Promise((r) => setTimeout(r, 3000))]).then(() => { if (this._decoKey === key) build(); });
+  }
+
+  drawDocDeco(ctx) {
+    if (!this._deco || !this._deco.length) return;
+    ctx.save();
+    ctx.transform(...this.canvas.viewportTransform);
+    for (const o of this._deco) o.render(ctx);
+    ctx.restore();
+  }
+
+  setDoc(path, value, { history = true } = {}) {
+    const d = this.design.doc ? JSON.parse(JSON.stringify(this.design.doc)) : {};
+    const [k, f] = path.split('.');
+    if (f) d[k] = { ...(d[k] || {}), [f]: value }; else d[k] = value;
+    this.design.doc = d;
+    this._decoKey = null;
+    this.refreshDeco();
+    this.scheduleSave();
+    clearTimeout(this._docT);
+    if (history) this._docT = setTimeout(() => { this.pushHistory(); this.scheduleThumb(0); this.design.pages.forEach((p, i) => { if (i !== this.cur) pageThumb(this.design, p, 200).then((u) => { this.thumbs.set(p.id, u); this.renderPages(); }).catch(() => {}); }); }, 350);
+  }
+
+  openDocSetup() {
+    const s = docSettings(this.design);
+    const fontOpts = (cur) => FONTS.map(([f]) => `<option ${f === cur ? 'selected' : ''}>${esc(f)}</option>`).join('');
+    const alignSeg = (k, cur) => `<div class="seg sm" data-seg="${k}">${[['left', 'ซ้าย'], ['center', 'กลาง'], ['right', 'ขวา']].map(([v, l]) => `<button type="button" data-v="${v}" class="${cur === v ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+    const band = (k, label, ph) => `
+      <fieldset class="ds-box"><legend>${label}</legend>
+        <textarea class="input full" rows="1" data-doc="${k}.text" placeholder="${ph}">${esc(s[k].text)}</textarea>
+        <div class="ds-row">${alignSeg(`${k}.align`, s[k].align)}
+          <label class="chk"><input type="checkbox" data-doc="${k}.bold" ${s[k].bold ? 'checked' : ''}> <b>ตัวหนา</b></label>
+          <label class="chk"><input type="checkbox" data-doc="${k}.italic" ${s[k].italic ? 'checked' : ''}> <i>ตัวเอียง</i></label>
+          <label class="chk">สี <input type="color" data-doc="${k}.color" value="${s[k].color}"></label>
+        </div>
+        <div class="ds-row"><label>ฟอนต์ <select class="input" data-doc="${k}.font">${fontOpts(s[k].font)}</select></label>
+          <label>ขนาด <input class="input num" type="number" min="6" max="48" step="0.5" data-doc="${k}.size" value="${s[k].size}"> pt</label></div>
+      </fieldset>`;
+    const m = modal({
+      title: 'ตั้งค่าเอกสาร: หัว/ท้ายกระดาษ เลขหน้า ลายน้ำ',
+      wide: true,
+      body: `<div class="docsetup">
+        <p class="hint">ใช้กับทุกหน้าของงานนี้ เห็นผลบนผืนงานทันที และส่งออกเป็นหัวกระดาษ ท้ายกระดาษ เลขหน้าอัตโนมัติ ลายน้ำ และขอบหน้ากระดาษของ Word จริง (แก้ไขต่อใน Word ได้)</p>
+        <div class="ds-grid">
+          <div>
+            ${band('header', 'หัวกระดาษ', 'เช่น เอกสารลับ / ชื่อหน่วยงาน')}
+            ${band('footer', 'ท้ายกระดาษ', 'เช่น โรงเรียน… ปีการศึกษา 2569')}
+            <label class="ds-row">ระยะหัว/ท้ายจากขอบกระดาษ <input class="input num" type="number" min="3" max="40" step="1" data-doc="edge" value="${s.edge}"> มม.</label>
+          </div>
+          <div>
+            <fieldset class="ds-box"><legend>เลขหน้า</legend>
+              <div class="seg sm" data-seg="pageNum.pos">${[['none', 'ไม่ใส่'], ['header', 'หัวกระดาษ'], ['footer', 'ท้ายกระดาษ']].map(([v, l]) => `<button type="button" data-v="${v}" class="${s.pageNum.pos === v ? 'on' : ''}">${l}</button>`).join('')}</div>
+              <div class="ds-row">${alignSeg('pageNum.align', s.pageNum.align)}
+                <select class="input" data-doc="pageNum.fmt">${PAGE_NUM_FORMATS.map(([v, l]) => `<option value="${v}" ${s.pageNum.fmt === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+              <div class="ds-row"><label class="chk"><input type="checkbox" data-doc="pageNum.skipFirst" ${s.pageNum.skipFirst ? 'checked' : ''}> ไม่แสดงเลขหน้าในหน้าแรก (หน้าปก)</label>
+                <label class="chk">สี <input type="color" data-doc="pageNum.color" value="${s.pageNum.color}"></label>
+                <label>ขนาด <input class="input num" type="number" min="6" max="48" step="0.5" data-doc="pageNum.size" value="${s.pageNum.size}"> pt</label></div>
+            </fieldset>
+            <fieldset class="ds-box"><legend>ลายน้ำ</legend>
+              <div class="chips">${['', ...WATERMARK_PRESETS].map((w) => `<button type="button" class="chip ${s.watermark.text === w ? 'on' : ''}" data-wm="${esc(w)}">${w || 'ไม่ใส่'}</button>`).join('')}</div>
+              <input class="input full" data-doc="watermark.text" value="${esc(s.watermark.text)}" placeholder="หรือพิมพ์ข้อความลายน้ำเอง">
+              <div class="ds-row"><label class="chk">สี <input type="color" data-doc="watermark.color" value="${s.watermark.color}"></label>
+                <label>จาง <input type="range" min="0.05" max="0.6" step="0.01" data-doc="watermark.opacity" value="${s.watermark.opacity}"></label>
+                <label class="chk"><input type="checkbox" data-doc="watermark.diagonal" ${s.watermark.diagonal ? 'checked' : ''}> แนวทแยง</label></div>
+            </fieldset>
+            <fieldset class="ds-box"><legend>ขอบหน้ากระดาษ</legend>
+              <div class="ds-row"><select class="input" data-doc="border.style">${BORDER_STYLES.map(([v, l]) => `<option value="${v}" ${s.border.style === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+                <label class="chk">สี <input type="color" data-doc="border.color" value="${s.border.color}"></label>
+                <label>หนา <input class="input num" type="number" min="0.5" max="6" step="0.25" data-doc="border.width" value="${s.border.width}"> pt</label>
+                <label>ห่างขอบ <input class="input num" type="number" min="2" max="10" step="0.5" data-doc="border.inset" value="${s.border.inset}"> มม.</label></div>
+            </fieldset>
+          </div>
+        </div>
+        <div class="ds-foot"><button class="btn" data-doc-clear>ล้างทั้งหมด</button><span class="grow"></span><button class="btn primary" data-doc-done>เสร็จสิ้น</button></div>
+      </div>`,
+    });
+    const el = m.el;
+    const val = (inp) => (inp.type === 'checkbox' ? inp.checked : inp.type === 'number' || inp.type === 'range' ? +inp.value : inp.value);
+    el.querySelectorAll('[data-doc]').forEach((inp) => {
+      const ev = inp.tagName === 'SELECT' || inp.type === 'checkbox' ? 'change' : 'input';
+      inp.addEventListener(ev, () => {
+        let v = val(inp);
+        if (inp.type === 'number') { const mn = +inp.min, mx = +inp.max; if (!isFinite(v)) return; v = Math.max(mn, Math.min(mx, v)); }
+        this.setDoc(inp.dataset.doc, v);
+        if (inp.dataset.doc === 'watermark.text') el.querySelectorAll('[data-wm]').forEach((b) => b.classList.toggle('on', b.dataset.wm === v));
+      });
+    });
+    el.querySelectorAll('[data-seg]').forEach((seg) => seg.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]');
+      if (!b) return;
+      seg.querySelectorAll('.on').forEach((x) => x.classList.remove('on'));
+      b.classList.add('on');
+      this.setDoc(seg.dataset.seg, b.dataset.v);
+    }));
+    el.querySelectorAll('[data-wm]').forEach((b) => b.addEventListener('click', () => {
+      el.querySelectorAll('[data-wm]').forEach((x) => x.classList.toggle('on', x === b));
+      el.querySelector('[data-doc="watermark.text"]').value = b.dataset.wm;
+      this.setDoc('watermark.text', b.dataset.wm);
+    }));
+    el.querySelector('[data-doc-clear]').addEventListener('click', () => {
+      this.design.doc = undefined;
+      this._decoKey = null;
+      this.refreshDeco();
+      this.pushHistory();
+      this.scheduleSave();
+      m.close();
+      this.openDocSetup();
+    });
+    el.querySelector('[data-doc-done]').addEventListener('click', () => m.close());
+  }
+
   normalizeTextScale(t) {
     const s = t.scaleX;
     t.set({
@@ -568,13 +692,14 @@ export class Editor {
     return {
       pages: this.design.pages.map((p) => ({ ...p })),
       cur: this.cur, width: this.W, height: this.H, mm: this.design.mm || null,
+      doc: JSON.stringify(this.design.doc || null),
     };
   }
 
   pushHistory() {
     const s = this.snapshot();
     const last = this.history[this.hIndex];
-    if (last && samePages(last.pages, s.pages) && last.width === s.width && last.height === s.height) return;
+    if (last && samePages(last.pages, s.pages) && last.width === s.width && last.height === s.height && last.doc === s.doc) return;
     this.history = this.history.slice(0, this.hIndex + 1);
     this.history.push(s);
     if (this.history.length > 60) this.history.shift();
@@ -595,6 +720,8 @@ export class Editor {
     this.design.width = s.width;
     this.design.height = s.height;
     this.design.mm = s.mm;
+    if (s.doc !== undefined) this.design.doc = JSON.parse(s.doc) || undefined;
+    this._decoKey = null;
     await this.loadPage(focus, { fit: dimsChanged });
     this.updateUndoButtons();
     this.scheduleSave();
@@ -657,6 +784,8 @@ export class Editor {
       const p = this.design.pages[this.cur];
       if (!p) return;
       try {
+        // with a document setup the thumbnail also shows header/footer/watermark (drawn outside the objects)
+        if (hasDoc(this.design)) { pageThumb(this.design, p, 200).then((u) => { this.thumbs.set(p.id, u); this.renderPages(); }).catch(() => {}); if (this.cur === 0) this.scheduleSave(); return; }
         const m = 200 / (this.W * this.zoom);
         this.thumbs.set(p.id, this.canvas.toDataURL({ format: 'jpeg', quality: 0.75, multiplier: m }));
         this.renderPages();
@@ -667,6 +796,7 @@ export class Editor {
 
   renderPages() {
     this.syncPageNumbers();
+    this.refreshDeco();
     const box = this.$('[data-pages]');
     if (!box) return;
     const ratio = this.W / this.H;
@@ -696,7 +826,7 @@ export class Editor {
     const p = { id: uid(), json, ...meta };
     this.design.pages.splice(this.cur + 1, 0, p);
     if (select) await this.loadPage(this.cur + 1);
-    pageThumb(this.design, json, 200).then((u) => { this.thumbs.set(p.id, u); this.renderPages(); }).catch(() => {});
+    pageThumb(this.design, p, 200).then((u) => { this.thumbs.set(p.id, u); this.renderPages(); }).catch(() => {});
     this.pushHistory();
     this.scheduleSave();
     this.renderPages();
@@ -963,6 +1093,7 @@ export class Editor {
         <button data-m="new">${icon('plus', 18)} สร้างงานออกแบบใหม่</button>
         <button data-m="copy">${icon('copy', 18)} ทำสำเนางานนี้</button>
         <button data-m="resize">${icon('resize', 18)} ปรับขนาดงาน</button>
+        <button data-m="docsetup">${icon('file', 18)} หัว/ท้ายกระดาษ เลขหน้า ลายน้ำ ขอบกระดาษ</button>
         <hr>
         <button data-m="save-project">${icon('download', 18)} บันทึกไฟล์โปรเจกต์ (.json)</button>
         <button data-m="open-project">${icon('folder', 18)} เปิดไฟล์โปรเจกต์</button>
@@ -985,6 +1116,7 @@ export class Editor {
       if (m === 'new') { await this.saveNow(); this.onExit({ newDesign: true }); }
       if (m === 'copy') { await this.saveNow(); this.onExit({ duplicate: this.design.id }); }
       if (m === 'resize') this.openResize();
+      if (m === 'docsetup') this.openDocSetup();
       if (m === 'save-project') exportDesign(this.design, { format: 'json', pages: [] });
       if (m === 'open-project') this.$('[data-file-project]').click();
       if (m === 'export') this.openExport();
@@ -2100,7 +2232,9 @@ export class Editor {
         <button class="text-add h1" data-act="text:heading">เพิ่มหัวข้อ</button>
         <button class="text-add h2" data-act="text:sub">เพิ่มหัวข้อย่อย</button>
         <button class="text-add body" data-act="text:body">เพิ่มเนื้อความ</button>
-        <div class="sec-title">เลขหน้าอัตโนมัติ</div>
+        <div class="sec-title">เอกสาร / รายงาน</div>
+        <button class="btn sm full" data-act="docsetup">📄 หัวกระดาษ ท้ายกระดาษ เลขหน้า ลายน้ำ ขอบกระดาษ</button>
+        <div class="sec-title">เลขหน้าอัตโนมัติ (วางเองบนหน้า)</div>
         <div class="grid2"><button class="btn sm" data-act="pagenum:n"># เลขหน้า</button><button class="btn sm" data-act="pagenum:nN"># หน้า / ทั้งหมด</button></div>
         <button class="btn sm full" data-act="toc-add">☰ สารบัญอัตโนมัติ</button>
         <div class="sec-title">ชุดข้อความสำเร็จรูป</div>
@@ -2336,6 +2470,7 @@ export class Editor {
       case 'line': return this.addShape(+arg, LINES);
       case 'sticker': return this.addObject(Object.assign(makeSticker(STICKERS[+arg], this.U * 0.25), { name: 'สติกเกอร์' }));
       case 'text': return this.addText(arg);
+      case 'docsetup': return this.openDocSetup();
       case 'pagenum': return this.addPageNumber(arg);
       case 'toc-add': return this.addTableOfContents();
       case 'ol-go': { const [pg, ix] = arg.split(':').map(Number); return this.outlineGo(pg, ix); }
@@ -2578,7 +2713,7 @@ export class Editor {
     this.canvas.getObjects().forEach((o) => { if (isText(o) && o.scaleX !== 1) this.normalizeTextScale(o); });
     this.commit();
     this.thumbs.clear();
-    this.design.pages.forEach((p) => pageThumb(this.design, p.json, 200).then((u) => { this.thumbs.set(p.id, u); this.renderPages(); }));
+    this.design.pages.forEach((p) => pageThumb(this.design, p, 200).then((u) => { this.thumbs.set(p.id, u); this.renderPages(); }));
     if (this.panel === 'templates') this.renderPanel();
     toast(`ปรับขนาดเป็น ${nw} × ${nh} px แล้ว`, 'ok');
   }

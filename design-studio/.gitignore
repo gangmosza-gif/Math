@@ -4,3 +4,4 @@ dist-single
 tests/report
 tests/report-office
 samples
+tests/report-docs

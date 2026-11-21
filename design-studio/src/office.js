@@ -2,7 +2,8 @@
 // Every page is analysed into "items": real text boxes, shapes, tables and charts that stay
 // editable in Office, plus pictures for anything Office cannot draw natively.
 import { Point } from 'fabric';
-import { renderPage } from './export.js';
+import { renderPage, pageRef } from './export.js';
+import { hasDoc, docSettings, docDecorations } from './docsetup.js';
 
 const isText = (o) => o && (o.type === 'textbox' || o.type === 'itext' || o.type === 'text');
 import { seriesOf, niceScale } from './charts.js';
@@ -170,26 +171,35 @@ function chartItem(g) {
  * Analyse one page. Returns { bg: { color } | { image }, items: [...] } in design pixels.
  * `mode`: 'pptx' | 'docx' – Word cannot rotate text frames or draw shapes, so those become pictures there.
  */
-export async function pageModel(design, pageJSON, mode = 'pptx') {
+export async function pageModel(design, pageArg, mode = 'pptx') {
+  const { json: pageJSON } = pageRef(design, pageArg);
   const json = typeof pageJSON === 'string' ? JSON.parse(pageJSON) : pageJSON;
-  const sc = await renderPage(design, json);
+  // Word gets header/footer/page numbers/watermark/border as real Word features (added in buildDocx);
+  // PowerPoint has no headers, so they come in as ordinary editable text on each slide
+  const sc = await renderPage(design, pageArg, { deco: mode === 'pptx' });
+  const U = Math.min(design.width, design.height);
   const items = [];
   try {
     let bg;
     const bgc = sc.backgroundColor;
     if (!sc.backgroundImage && !isGradient(bgc)) bg = { color: parseColor(bgc) || { hex: 'FFFFFF', alpha: 1 } };
     else {
-      const bgOnly = await renderPage(design, { ...json, objects: [] });
+      const bgOnly = await renderPage(design, { ...json, objects: [] }, { deco: false });
       bg = { image: bgOnly.toDataURL({ format: 'png', multiplier: Math.min(2, 2400 / Math.max(design.width, design.height)) }) };
       bgOnly.dispose();
     }
     for (const o of sc.getObjects()) {
       if (!o.visible) continue;
+      if (o.decoRole === 'watermark') { items.push({ ...asPicture(o), alt: 'ลายน้ำ' }); continue; }
       if (isText(o)) {
         // curved or gradient text cannot be reproduced by Office; Word text frames also cannot rotate or carry outlines/shadows
         const hollow = !parseColor(o.fill);
         const effects = o.path || isGradient(o.fill) || (mode === 'docx' && ((o.angle % 360) || o.flipX || o.flipY || hollow));
-        items.push(effects ? asPicture(o) : textItem(o));
+        if (effects) { items.push(asPicture(o)); continue; }
+        // headings (same rule as the outline panel) become Word heading paragraphs
+        const size = (o.fontSize || 0) * Math.abs(o.scaleY || 1);
+        const level = o.autoPage || o.autoToc || o.decoRole ? 0 : size >= U * 0.08 ? 1 : size >= U * 0.055 ? 2 : 0;
+        items.push(textItem(o, { level, autoPage: o.autoPage || null }));
         continue;
       }
       if (o.shapeText) {
@@ -335,7 +345,7 @@ export async function buildPptx(design, pages, onProgress = () => {}) {
   for (let n = 0; n < pages.length; n++) {
     onProgress(n, pages.length);
     const pg = pages[n];
-    const model = await pageModel(design, pg.json, 'pptx');
+    const model = await pageModel(design, pg, 'pptx');
     const slide = pptx.addSlide();
     if (model.bg.color) slide.background = { color: model.bg.color.hex };
     else slide.background = { data: b64(model.bg.image) };
@@ -435,7 +445,7 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
     const bold = st.fontWeight === 'bold' || +st.fontWeight >= 600;
     const italic = st.fontStyle === 'italic';
     return new D.TextRun({
-      text: r.text, font: font(st.fontFamily), size: half, sizeComplexScript: half, bold, boldComplexScript: bold, italics: italic, italicsComplexScript: italic,
+      ...(r.children ? { children: r.children } : { text: r.text }), font: font(st.fontFamily), size: half, sizeComplexScript: half, bold, boldComplexScript: bold, italics: italic, italicsComplexScript: italic,
       color: col ? col.hex : 'FFFFFF', underline: st.underline ? { type: D.UnderlineType.SINGLE } : undefined, strike: !!st.linethrough,
       shading: hl ? { type: D.ShadingType.CLEAR, fill: hl.hex, color: 'auto' } : undefined,
       characterSpacing: it.charSpacing ? Math.round(PT(st.fontSize * it.scale) * it.charSpacing / 1000 * 20) : undefined,
@@ -461,11 +471,75 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
       if (l.runs.length) cur.push(...l.runs.map((r) => runOf(r, it)));
       else cur.push(new D.TextRun({ text: '', font: font(first.fontFamily), size: Math.round(PT((first.fontSize || 20) * it.scale) * 2) }));
     }
+    if (it.autoPage) {
+      // a page number placed on the page: a real PAGE field, so Word renumbers it by itself
+      const r0 = it.lines[0]?.runs[0];
+      const st = r0 ? r0.style : first;
+      const run = (children) => runOf({ text: undefined, style: st, children }, it);
+      paras.length = 0;
+      paras.push([run(pageFieldParts(it.autoPage === 'nN' ? 'nN' : 'n'))]);
+    }
     return paras.map((children) => {
       if (it.link) children = [new D.ExternalHyperlink({ link: it.link, children })];
-      return new D.Paragraph({ frame, alignment: align(it.align), spacing: { before: 0, after: 0, line, lineRule: D.LineRuleType.EXACT }, children });
+      const heading = it.level === 1 ? D.HeadingLevel.HEADING_1 : it.level === 2 ? D.HeadingLevel.HEADING_2 : undefined;
+      return new D.Paragraph({ frame, heading, alignment: align(it.align), spacing: { before: 0, after: 0, line, lineRule: D.LineRuleType.EXACT }, children });
     });
   };
+
+  const pageFieldParts = (fmt) => ({
+    n: [D.PageNumber.CURRENT], nN: [D.PageNumber.CURRENT, ' / ', D.PageNumber.TOTAL_PAGES],
+    th: ['หน้า ', D.PageNumber.CURRENT], thN: ['หน้า ', D.PageNumber.CURRENT, ' จาก ', D.PageNumber.TOTAL_PAGES],
+    dash: ['- ', D.PageNumber.CURRENT, ' -'],
+  }[fmt] || [D.PageNumber.CURRENT]);
+
+  // ---- document setup → Word header / footer / PAGE fields / watermark / page border
+  const doc = hasDoc(design) ? docSettings(design) : null;
+  const MMTW = (mm) => Math.round((mm / 25.4) * 1440);
+  const bandParas = (where, withNum, withWatermark) => {
+    const paras = [];
+    const side = doc.border.style !== 'none' ? Math.max(doc.edge, doc.border.inset + 4) : doc.edge;
+    const indent = { left: MMTW(side), right: MMTW(side) };
+    const runStyle = (c) => ({ font: font(c.font), size: Math.round(c.size * 2), sizeComplexScript: Math.round(c.size * 2), bold: !!c.bold, boldComplexScript: !!c.bold, italics: !!c.italic, italicsComplexScript: !!c.italic, color: (parseColor(c.color) || { hex: '000000' }).hex, language: { value: 'th-TH', bidirectional: 'th-TH' } });
+    const c = doc[where];
+    // the watermark rides in the first header paragraph as a placeholder run, swapped for VML WordArt after packing
+    let lead = withWatermark ? [new D.TextRun({ text: 'LAIWATERMARK' })] : [];
+    const take = () => { const l = lead; lead = []; return l; };
+    const lineOf = (cfg) => ({ before: 0, after: 0, line: Math.round(cfg.size * 1.3 * 20), lineRule: D.LineRuleType.EXACT });
+    if (c.text.trim()) {
+      const lines = c.text.split('\n');
+      paras.push(new D.Paragraph({ alignment: align(c.align), indent, spacing: lineOf(c), children: [...take(), ...lines.flatMap((l, i) => [...(i ? [new D.TextRun({ break: 1 })] : []), new D.TextRun({ text: l, ...runStyle(c) })])] }));
+    }
+    if (withNum && doc.pageNum.pos === where) {
+      paras.push(new D.Paragraph({ alignment: align(doc.pageNum.align), indent, spacing: lineOf(doc.pageNum), children: [...take(), new D.TextRun({ children: pageFieldParts(doc.pageNum.fmt), ...runStyle({ ...doc.pageNum, bold: false, italic: false }) })] }));
+    }
+    if (lead.length || !paras.length) paras.push(new D.Paragraph({ spacing: { before: 0, after: 0, line: 20, lineRule: D.LineRuleType.EXACT }, children: take() }));
+    return paras;
+  };
+  let headerSet = null;
+  if (doc) {
+    const wm = !!doc.watermark.text.trim();
+    const mk = (withNum) => ({ headers: new D.Header({ children: bandParas('header', withNum, wm) }), footers: new D.Footer({ children: bandParas('footer', withNum, false) }) });
+    const def = mk(true);
+    headerSet = { headers: { default: def.headers }, footers: { default: def.footers }, titlePage: false };
+    if (doc.pageNum.skipFirst && doc.pageNum.pos !== 'none') {
+      const first = mk(false);
+      headerSet = { headers: { default: def.headers, first: first.headers }, footers: { default: def.footers, first: first.footers }, titlePage: true };
+    }
+  }
+  const bandMm = (where) => {
+    if (!doc) return 0;
+    const pts = (doc[where].text.trim() ? doc[where].size * 1.3 * doc[where].text.split('\n').length : 0) + (doc.pageNum.pos === where ? doc.pageNum.size * 1.3 : 0);
+    return (pts / 72) * 25.4;
+  };
+  const sideMm = doc ? (doc.border.style !== 'none' ? Math.max(doc.edge, doc.border.inset + 4) : doc.edge) : 12.7;
+  const bodyMargins = doc
+    ? { top: MMTW(doc.edge + bandMm('header') + 3), bottom: MMTW(doc.edge + bandMm('footer') + 3), left: MMTW(Math.max(sideMm, 12.7)), right: MMTW(Math.max(sideMm, 12.7)) }
+    : { top: MMTW(12.7), bottom: MMTW(12.7), left: MMTW(12.7), right: MMTW(12.7) };
+  const BORDER = { single: 'SINGLE', thick: 'SINGLE', double: 'DOUBLE', dashed: 'DASHED', dotted: 'DOTTED' };
+  const pageBorders = doc && doc.border.style !== 'none' ? (() => {
+    const b = { style: D.BorderStyle[BORDER[doc.border.style]], size: Math.max(2, Math.min(96, Math.round(doc.border.width * (doc.border.style === 'thick' ? 2.5 : 1) * 8))), color: (parseColor(doc.border.color) || { hex: '000000' }).hex, space: Math.min(31, Math.round((doc.border.inset / 25.4) * 72)) };
+    return { pageBorders: { display: D.PageBorderDisplay.ALL_PAGES, offsetFrom: D.PageBorderOffsetFrom.PAGE, zOrder: D.PageBorderZOrder.FRONT }, pageBorderTop: b, pageBorderBottom: b, pageBorderLeft: b, pageBorderRight: b };
+  })() : undefined;
 
   const tableOf = (it) => {
     const fszHalf = Math.round(PT(it.fontSize) * 2);
@@ -528,13 +602,17 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
   };
 
   const sections = [];
+  let coloredBg = false;
   for (let n = 0; n < pages.length; n++) {
     onProgress(n, pages.length);
-    const model = await pageModel(design, pages[n].json, 'docx');
+    const model = await pageModel(design, pages[n], 'docx');
     const anchors = [];
     const flow = [];
     let z = 1;
-    // page background: a full-page picture (Word only has one page colour for the whole document)
+    // page background: a full-page picture (Word only has one page colour for the whole document).
+    // A plain white page needs none — Word pages are white — which also keeps the watermark visible.
+    const whitePage = !model.bg.image && model.bg.color && /^F{6}$/i.test(model.bg.color.hex) && (model.bg.color.alpha ?? 1) >= 0.99;
+    if (!whitePage) coloredBg = true;
     let bgURL = model.bg.image;
     if (!bgURL) {
       const c = document.createElement('canvas');
@@ -544,7 +622,7 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
       g.fillRect(0, 0, 16, 16);
       bgURL = c.toDataURL('image/png');
     }
-    anchors.push(new D.ImageRun({ type: 'png', data: dataOf(bgURL), transformation: { width: P96(design.width), height: P96(design.height) }, floating: floating(0, 0, z++), altText: { name: 'พื้นหลัง', description: 'พื้นหลังของหน้า', title: 'พื้นหลัง' } }));
+    if (!whitePage) anchors.push(new D.ImageRun({ type: 'png', data: dataOf(bgURL), transformation: { width: P96(design.width), height: P96(design.height) }, floating: floating(0, 0, z++), altText: { name: 'พื้นหลัง', description: 'พื้นหลังของหน้า', title: 'พื้นหลัง' } }));
     // Word keeps text frames and tables in one "text layer": a picture goes behind it unless it must cover
     // a text/table that sits below it in the design, in which case it floats in front of the text.
     const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
@@ -566,16 +644,59 @@ export async function buildDocx(design, pages, onProgress = () => {}) {
       properties: {
         type: n === 0 ? undefined : D.SectionType.NEXT_PAGE,
         // explicit width/height (docx would swap them again for LANDSCAPE)
-        page: { size: { width: TW(design.width), height: TW(design.height) }, margin: { top: 0, right: 0, bottom: 0, left: 0, header: 0, footer: 0, gutter: 0 } },
+        page: {
+          size: { width: TW(design.width), height: TW(design.height) },
+          // real margins so text typed later in Word starts inside the page (the design itself is positioned absolutely)
+          margin: { ...bodyMargins, header: doc ? MMTW(doc.edge) : 0, footer: doc ? MMTW(doc.edge) : 0, gutter: 0 },
+          ...(pageBorders ? { borders: pageBorders } : {}),
+        },
+        ...(headerSet && n === 0 && headerSet.titlePage ? { titlePage: true } : {}),
       },
+      ...(headerSet ? { headers: n === 0 || !headerSet.titlePage ? headerSet.headers : { default: headerSet.headers.default }, footers: n === 0 || !headerSet.titlePage ? headerSet.footers : { default: headerSet.footers.default } } : {}),
       children: [new D.Paragraph({ spacing: { before: 0, after: 0, line: 20, lineRule: D.LineRuleType.EXACT }, children: anchors }), ...flow, new D.Paragraph({ spacing: { before: 0, after: 0, line: 20, lineRule: D.LineRuleType.EXACT }, children: [] })],
     });
   }
   onProgress(pages.length, pages.length);
-  const doc = new D.Document({
+  const wordDoc = new D.Document({
     title: design.name, creator: 'Lai Studio',
-    styles: { default: { document: { run: { font: font('Sarabun'), language: { value: 'th-TH', bidirectional: 'th-TH' } } } } },
+    styles: {
+      default: { document: { run: { font: font('Sarabun'), language: { value: 'th-TH', bidirectional: 'th-TH' } } } },
+      // neutral heading styles: the look comes from each run, the styles give Word's navigation pane / table of contents the outline
+      paragraphStyles: [1, 2].map((lv) => ({ id: `Heading${lv}`, name: `heading ${lv}`, basedOn: 'Normal', next: 'Normal', quickFormat: true, paragraph: { outlineLevel: lv - 1, spacing: { before: 0, after: 0 } }, run: { color: '000000' } })),
+    },
     sections,
   });
-  return fixChartFonts(await D.Packer.toBlob(doc));
+  let blob = await fixChartFonts(await D.Packer.toBlob(wordDoc));
+  if (doc && doc.watermark.text.trim()) blob = await addWatermark(blob, design, doc, coloredBg);
+  return blob;
+}
+
+/** Swap the placeholder run in every header for a Word watermark (VML WordArt, editable in Design → Watermark). */
+async function addWatermark(blob, design, doc, front = false) {
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(blob);
+  const w = doc.watermark;
+  const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const specs = docDecorations(design, 0, 1).find((x) => x.kind === 'watermark');
+  const ptPerPx = inchPerPx(design) * 72;
+  const wPt = (specs.textW * ptPerPx).toFixed(1), hPt = (specs.fontSize * ptPerPx * 1.0).toFixed(1);
+  const rot = Math.round(((specs.angle % 360) + 360) % 360);
+  const col = '#' + (parseColor(w.color) || { hex: 'C0C0C0' }).hex;
+  let n = 0;
+  const vml = () => {
+    n++;
+    return `<w:r><w:rPr><w:noProof/></w:rPr><w:pict>${n > 0 ? '<v:shapetype id="_x0000_t136" coordsize="21600,21600" o:spt="136" adj="10800" path="m@7,l@8,m@5,21600l@6,21600e"><v:formulas><v:f eqn="sum #0 0 10800"/><v:f eqn="prod #0 2 1"/><v:f eqn="sum 21600 0 @1"/><v:f eqn="sum 0 0 @2"/><v:f eqn="sum 21600 0 @3"/><v:f eqn="if @0 @3 0"/><v:f eqn="if @0 21600 @1"/><v:f eqn="if @0 0 @2"/><v:f eqn="if @0 @4 21600"/><v:f eqn="mid @5 @6"/><v:f eqn="mid @8 @5"/><v:f eqn="mid @7 @8"/><v:f eqn="mid @6 @7"/><v:f eqn="sum @6 0 @5"/></v:formulas><v:path textpathok="t" o:connecttype="custom" o:connectlocs="@9,0;@10,10800;@11,21600;@12,10800" o:connectangles="270,180,90,0"/><v:textpath on="t" fitshape="t"/><v:handles><v:h position="#0,bottomRight" xrange="6629,14971"/></v:handles><o:lock v:ext="edit" text="t" shapetype="t"/></v:shapetype>' : ''}`
+      + `<v:shape id="PowerPlusWaterMarkObject${1000 + n}" o:spid="_x0000_s${2048 + n}" type="#_x0000_t136" style="position:absolute;margin-left:0;margin-top:0;width:${wPt}pt;height:${hPt}pt;rotation:${rot};z-index:${front ? 251659264 : -251654144};mso-position-horizontal:center;mso-position-horizontal-relative:page;mso-position-vertical:center;mso-position-vertical-relative:page" o:allowincell="f" fillcolor="${col}" stroked="f">`
+      + `<v:fill opacity="${(+w.opacity).toFixed(2)}"/><v:textpath style="font-family:&quot;${esc(w.font)}&quot;;font-size:1pt${w.bold ? ';font-weight:bold' : ''}" string="${esc(w.text.trim())}"/><w10:wrap anchorx="page" anchory="page"/></v:shape></w:pict></w:r>`;
+  };
+  for (const f of Object.keys(zip.files).filter((x) => /^word\/header\d*\.xml$/.test(x))) {
+    let x = await zip.file(f).async('string');
+    if (!x.includes('LAIWATERMARK')) continue;
+    x = x.replace(/<w:r>(?:(?!<w:r>)[\s\S])*?LAIWATERMARK[\s\S]*?<\/w:r>/, vml);
+    // make sure the VML namespaces are declared on the root
+    const ns = { 'xmlns:v': 'urn:schemas-microsoft-com:vml', 'xmlns:o': 'urn:schemas-microsoft-com:office:office', 'xmlns:w10': 'urn:schemas-microsoft-com:office:word' };
+    x = x.replace(/<w:hdr\b([^>]*)>/, (m0, attrs) => `<w:hdr${attrs}${Object.entries(ns).filter(([k]) => !attrs.includes(k + '=')).map(([k, v]) => ` ${k}="${v}"`).join('')}>`);
+    zip.file(f, x);
+  }
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 }

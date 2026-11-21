@@ -8,7 +8,8 @@
     "build:single": "vite build --mode single",
     "preview": "vite preview",
     "test": "node tests/e2e.cjs && node tests/office.cjs",
-    "test:office": "node tests/office.cjs"
+    "test:office": "node tests/office.cjs",
+    "test:docs": "node tests/docs.cjs"
   },
   "dependencies": {
     "docx": "^9.16.0",

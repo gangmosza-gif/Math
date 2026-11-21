@@ -1884,6 +1884,68 @@ function meanDiff(a, b) {
     assert(execFileSync('pdftotext', ['-enc', 'UTF-8', f, '-']).toString().replace(/\s+/g, '').includes('ทดสอบค้นหาภาษาไทย'), 'print pdf not searchable');
     await ev(() => { const c = __lai.canvas; c.remove(...c.getObjects().slice(-3)); __lai.commit(); });
   });
+  await step('[เอกสาร] หัว/ท้ายกระดาษ เลขหน้า ลายน้ำ ขอบกระดาษ: ตั้งค่า เห็นบนงาน ส่งออก PDF เลิกทำ และโหลดกลับ', async () => {
+    const roles = () => ev(() => (__lai._deco || []).map((o) => o.decoRole).sort().join(','));
+    // open from the file menu
+    await page.click('[data-act="file-menu"]');
+    await page.click('[data-m="docsetup"]');
+    await page.waitForSelector('.docsetup');
+    await page.fill('[data-doc="header.text"]', 'หัวกระดาษทดสอบ');
+    await page.check('[data-doc="header.bold"]');
+    await page.fill('[data-doc="footer.text"]', 'ท้ายกระดาษทดสอบ');
+    await page.click('[data-seg="pageNum.pos"] [data-v="footer"]');
+    await page.selectOption('[data-doc="pageNum.fmt"]', 'thN');
+    await page.click('[data-wm="ลับ"]');
+    await page.selectOption('[data-doc="border.style"]', 'double');
+    await wait(500);
+    const d = await ev(() => __lai.design.doc);
+    assert(d.header.text === 'หัวกระดาษทดสอบ' && d.header.bold === true && d.footer.text === 'ท้ายกระดาษทดสอบ' && d.pageNum.pos === 'footer' && d.pageNum.fmt === 'thN' && d.watermark.text === 'ลับ' && d.border.style === 'double', JSON.stringify(d));
+    assert((await roles()) === 'border,border,footer,header,pagenum,watermark', `deco ${await roles()}`);
+    // decorations are drawn, never saved into the page
+    assert(!(await ev(() => __lai.design.pages.some((p) => p.json.includes('docDeco') || p.json.includes('decoRole')))), 'deco saved into page');
+    assert(!(await ev(() => __lai.canvas.getObjects().some((o) => o.docDeco))), 'deco is a canvas object');
+    await page.click('[data-doc-done]');
+    // exported PDF: every page has header, footer and its own page number
+    const n = await ev(() => __lai.visiblePageIndexes().length);
+    const pdf = await exportAs('pdf');
+    const f = path.join(OUT, 'docsetup.pdf');
+    fs.writeFileSync(f, pdf);
+    for (let i = 1; i <= n; i++) {
+      const t = execFileSync('pdftotext', ['-raw', '-f', String(i), '-l', String(i), '-enc', 'UTF-8', f, '-']).toString().replace(/\s+/g, '');
+      for (const w of ['หัวกระดาษทดสอบ', 'ท้ายกระดาษทดสอบ', `หน้า${i}จาก${n}`]) assert(t.includes(w), `p${i} missing ${w}: ${t.slice(0, 120)}`);
+    }
+    // no page number on the cover
+    await page.click('[data-act="file-menu"]');
+    await page.click('[data-m="docsetup"]');
+    await page.check('[data-doc="pageNum.skipFirst"]');
+    await wait(450);
+    await ev(() => __lai.loadPage(0));
+    await wait(200);
+    assert(!(await roles()).includes('pagenum'), `cover has page number ${await roles()}`);
+    // undo / redo of a setting
+    await page.fill('[data-doc="header.text"]', 'แก้หัวกระดาษ');
+    await wait(500);
+    await page.click('[data-doc-done]');
+    await page.keyboard.press('Control+z'); await wait(400);
+    assert((await ev(() => __lai.design.doc.header.text)) === 'หัวกระดาษทดสอบ', `undo ${await ev(() => __lai.design.doc.header.text)}`);
+    await page.keyboard.press('Control+y'); await wait(400);
+    assert((await ev(() => __lai.design.doc.header.text)) === 'แก้หัวกระดาษ', 'redo');
+    // survives a reload
+    await ev(() => __lai.saveNow());
+    await page.reload();
+    await page.waitForSelector('.canvas-container');
+    await wait(800);
+    assert((await ev(() => __lai.design.doc && __lai.design.doc.header.text)) === 'แก้หัวกระดาษ', 'after reload');
+    assert((await roles()).includes('watermark'), 'deco after reload');
+    // open from the text panel, clear everything
+    await panel('text');
+    await page.click('[data-act="docsetup"]');
+    await page.waitForSelector('.docsetup');
+    await page.click('[data-doc-clear]');
+    await page.waitForSelector('.docsetup');
+    assert(!(await ev(() => __lai.design.doc)) && (await roles()) === '', 'clear');
+    await page.click('[data-doc-done]');
+  });
   await step('PDF หลายหน้า (เลือกหน้า 1,3)', async () => {
     const b = await exportAs('pdf', { pages: '1,3' });
     assert(b.slice(0, 4).toString() === '%PDF' && pdfPages(b) === 2, `pages=${pdfPages(b)}`);

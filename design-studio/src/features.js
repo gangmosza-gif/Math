@@ -630,10 +630,10 @@ export const features = {
       const nxi = order[pos + 1];
       nxImg.hidden = nxi === undefined;
       if (nxi !== undefined) {
-        if (!cache.has(nxi)) cache.set(nxi, pageToDataURL(this.design, this.design.pages[nxi].json, { format: 'jpeg', multiplier: mult, quality: 0.92 }));
+        if (!cache.has(nxi)) cache.set(nxi, pageToDataURL(this.design, this.design.pages[nxi], { format: 'jpeg', multiplier: mult, quality: 0.92 }));
         cache.get(nxi).then((u) => { if (order[pos + 1] === nxi) nxImg.src = u; });
       }
-      if (!cache.has(i)) cache.set(i, pageToDataURL(this.design, this.design.pages[i].json, { format: 'jpeg', multiplier: mult, quality: 0.92 }));
+      if (!cache.has(i)) cache.set(i, pageToDataURL(this.design, this.design.pages[i], { format: 'jpeg', multiplier: mult, quality: 0.92 }));
       const want = i;
       const url = await cache.get(i);
       if (want !== i) return;
@@ -641,7 +641,7 @@ export const features = {
       img.alt = this.pageDescription(i);
       ov.querySelector('.present-loading')?.remove();
       ov.querySelectorAll('.present-link').forEach((x) => x.remove());
-      const links = await pageLinks(this.design, this.design.pages[i].json);
+      const links = await pageLinks(this.design, this.design.pages[i]);
       if (want !== i) return;
       const stage = ov.querySelector('.present-stage');
       const place = () => {
@@ -654,7 +654,7 @@ export const features = {
       links.forEach((l) => { const aEl = document.createElement('a'); aEl.className = 'present-link'; aEl.href = l.url; aEl.target = '_blank'; aEl.rel = 'noopener'; aEl.title = l.url; aEl.addEventListener('click', (e) => e.stopPropagation()); stage.appendChild(aEl); });
       if (img.complete) place(); else img.onload = place;
       const nx = order[pos + 1];
-      if (nx !== undefined && !cache.has(nx)) cache.set(nx, pageToDataURL(this.design, this.design.pages[nx].json, { format: 'jpeg', multiplier: mult, quality: 0.92 }));
+      if (nx !== undefined && !cache.has(nx)) cache.set(nx, pageToDataURL(this.design, this.design.pages[nx], { format: 'jpeg', multiplier: mult, quality: 0.92 }));
     };
     const go = (d) => { const q = Math.max(0, Math.min(n - 1, pos + d)); if (q !== pos) { pos = q; i = order[pos]; show(); } };
     const t0 = Date.now();
@@ -755,7 +755,7 @@ export const features = {
     });
     this.canvas.requestRenderAll();
     this.commit();
-    this.design.pages.forEach((pg, i) => { if (i !== this.cur) pageThumb(this.design, pg.json, 200).then((u) => { this.thumbs.set(pg.id, u); this.renderPages(); }).catch(() => {}); });
+    this.design.pages.forEach((pg, i) => { if (i !== this.cur) pageThumb(this.design, pg, 200).then((u) => { this.thumbs.set(pg.id, u); this.renderPages(); }).catch(() => {}); });
     toast(n ? `เปลี่ยนฟอนต์แบรนด์แล้ว ${n} ข้อความ` : 'ข้อความทั้งหมดใช้ฟอนต์แบรนด์อยู่แล้ว');
     return n;
   },
@@ -1099,7 +1099,7 @@ features.openFindReplace = function () {
 };
 
 function pageThumbFor(ed, p) {
-  import('./export.js').then(({ pageThumb }) => pageThumb(ed.design, p.json, 200).then((u) => { ed.thumbs.set(p.id, u); ed.renderPages(); }));
+  import('./export.js').then(({ pageThumb }) => pageThumb(ed.design, p, 200).then((u) => { ed.thumbs.set(p.id, u); ed.renderPages(); }));
 }
 
 // ------------------------------------------------------------ version history

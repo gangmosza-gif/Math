@@ -1,4 +1,6 @@
-import { StaticCanvas } from 'fabric';
+import { StaticCanvas, Rect as FRect, Text as FText, Textbox as FTextbox } from 'fabric';
+import { hasDoc, docDecorations, decorationObjects, decorationFonts, visibleNumber } from './docsetup.js';
+const fabricNS = { Rect: FRect, Text: FText, Textbox: FTextbox };
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
 import { ensureFonts, fontsInJSON, fontCssUrl, FONT_NAMES } from './fonts.js';
@@ -61,9 +63,27 @@ async function addTextLayer(pdf, design, pageJSON, f, ox, oy, ptPerUnit) {
 }
 
 /** Render one page (serialized JSON string) to an offscreen fabric canvas. */
-export async function renderPage(design, pageJSON, { transparent = false, forceBg = null, bleed = 0 } = {}) {
+/**
+ * Pages can be passed as their JSON (string or object) or as the page record itself (`design.pages[i]`).
+ * Passing the record tells exactly which page it is (two identical pages share the same JSON) —
+ * needed for page numbers in the document setup.
+ */
+export function pageRef(design, p) {
+  if (p && typeof p === 'object' && typeof p.json === 'string') return { json: p.json, idx: design.pages.indexOf(p) };
+  return { json: p, idx: typeof p === 'string' ? design.pages.findIndex((x) => x.json === p) : -1 };
+}
+
+export async function renderPage(design, pageArg, { transparent = false, forceBg = null, bleed = 0, deco = true } = {}) {
+  const { json: pageJSON, idx: pageIdx } = pageRef(design, pageArg);
+  // header/footer, page number, watermark and page border (document setup) — only for real pages of the design
+  let num = null;
+  if (deco && hasDoc(design)) {
+    const idx = typeof deco === 'object' ? -2 : pageIdx;
+    num = typeof deco === 'object' ? deco : idx >= 0 ? visibleNumber(design, idx) : null;
+  }
   const json = typeof pageJSON === 'string' ? JSON.parse(pageJSON) : pageJSON;
-  await ensureFonts(fontsInJSON(json));
+  await ensureFonts([...fontsInJSON(json), ...(num ? decorationFonts(design) : [])]);
+  const decoSpecs = num && num.i >= 0 ? docDecorations(design, num.i, num.n) : [];
   const el = document.createElement('canvas');
   const sc = new StaticCanvas(el, { width: design.width + bleed * 2, height: design.height + bleed * 2, enableRetinaScaling: false, renderOnAddRemove: false });
   await sc.loadFromJSON(json);
@@ -77,6 +97,7 @@ export async function renderPage(design, pageJSON, { transparent = false, forceB
       bi.set({ scaleX: k, scaleY: k, originX: 'left', originY: 'top', left: (design.width + bleed * 2 - bi.width * k) / 2, top: (design.height + bleed * 2 - bi.height * k) / 2 });
     }
   }
+  if (decoSpecs.length) decorationObjects(fabricNS, decoSpecs, false).forEach((o) => sc.add(o));
   if (transparent) sc.backgroundColor = '';
   else if (!sc.backgroundColor && forceBg) sc.backgroundColor = forceBg;
   sc.renderAll();
@@ -84,10 +105,11 @@ export async function renderPage(design, pageJSON, { transparent = false, forceB
 }
 
 /** Links on a page: [{ url, left, top, width, height }] in design pixels. */
-export async function pageLinks(design, pageJSON) {
+export async function pageLinks(design, pageArg) {
+  const { json: pageJSON } = pageRef(design, pageArg);
   const json = typeof pageJSON === 'string' ? JSON.parse(pageJSON) : pageJSON;
   if (!(json.objects || []).some((o) => o.link)) return [];
-  const sc = await renderPage(design, json);
+  const sc = await renderPage(design, json, { deco: false });
   const out = sc.getObjects().filter((o) => o.link && o.visible).map((o) => ({ url: o.link, ...o.getBoundingRect() }));
   sc.dispose();
   return out;
@@ -109,9 +131,10 @@ export async function pageToDataURL(design, pageJSON, { format = 'png', multipli
   return url;
 }
 
-export async function pageToSVG(design, pageJSON) {
+export async function pageToSVG(design, pageArg) {
+  const { json: pageJSON } = pageRef(design, pageArg);
   const json = typeof pageJSON === 'string' ? JSON.parse(pageJSON) : pageJSON;
-  const sc = await renderPage(design, json);
+  const sc = await renderPage(design, pageArg);
   let svg = sc.toSVG({ width: design.width, height: design.height, viewBox: { x: 0, y: 0, width: design.width, height: design.height } });
   sc.dispose();
   const fonts = fontsInJSON(json).filter((f) => FONT_NAMES.includes(f));
@@ -174,7 +197,7 @@ export async function exportDesign(design, opts) {
     pptx.layout = 'LAI';
     for (let n = 0; n < list.length; n++) {
       onProgress(n, list.length);
-      const url = await pageToDataURL(design, list[n].page.json, { format: 'png', multiplier: Math.max(1, scale) });
+      const url = await pageToDataURL(design, list[n].page, { format: 'png', multiplier: Math.max(1, scale) });
       pptx.addSlide().addImage({ data: url, x: 0, y: 0, w: wIn * k, h: hIn * k });
     }
     onProgress(list.length, list.length);
@@ -196,11 +219,11 @@ export async function exportDesign(design, opts) {
     for (let k = 0; k < list.length; k++) {
       onProgress(k, list.length);
       if (k > 0) pdf.addPage([pw, ph], orientation);
-      const url = await pageToDataURL(design, list[k].page.json, { format: 'jpeg', multiplier: scale, quality: 0.95 });
+      const url = await pageToDataURL(design, list[k].page, { format: 'jpeg', multiplier: scale, quality: 0.95 });
       pdf.addImage(url, 'JPEG', 0, 0, pw, ph, undefined, 'FAST');
-      if (opts.searchable !== false) await addTextLayer(pdf, design, list[k].page.json, pw / design.width, 0, 0, unit === 'mm' ? 72 / 25.4 : 1);
+      if (opts.searchable !== false) await addTextLayer(pdf, design, list[k].page, pw / design.width, 0, 0, unit === 'mm' ? 72 / 25.4 : 1);
       const f = pw / design.width;
-      for (const l of await pageLinks(design, list[k].page.json)) pdf.link(l.left * f, l.top * f, l.width * f, l.height * f, { url: l.url });
+      for (const l of await pageLinks(design, list[k].page)) pdf.link(l.left * f, l.top * f, l.width * f, l.height * f, { url: l.url });
     }
     onProgress(list.length, list.length);
     return downloadBlob(pdf.output('blob'), `${name}.pdf`);
@@ -213,10 +236,10 @@ export async function exportDesign(design, opts) {
     const { i, page } = list[k];
     let blob;
     if (format === 'svg') {
-      blob = new Blob([await pageToSVG(design, page.json)], { type: 'image/svg+xml' });
+      blob = new Blob([await pageToSVG(design, page)], { type: 'image/svg+xml' });
     } else {
       const f = format === 'jpg' ? 'jpeg' : format;
-      blob = dataURLToBlob(await pageToDataURL(design, page.json, { format: f, multiplier: scale, quality, transparent }));
+      blob = dataURLToBlob(await pageToDataURL(design, page, { format: f, multiplier: scale, quality, transparent }));
     }
     files.push({ blob, filename: list.length > 1 ? `page-${String(i + 1).padStart(2, '0')}.${ext}` : `${name}.${ext}` });
   }
@@ -232,7 +255,7 @@ export async function exportDesign(design, opts) {
 /** Open the browser print dialog with every page as an image. */
 export async function printDesign(design) {
   const imgs = [];
-  for (const p of design.pages.filter((x) => !x.hidden)) imgs.push(await pageToDataURL(design, p.json, { format: 'png', multiplier: 2 }));
+  for (const p of design.pages.filter((x) => !x.hidden)) imgs.push(await pageToDataURL(design, p, { format: 'png', multiplier: 2 }));
   const frame = document.createElement('iframe');
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
   document.body.appendChild(frame);
@@ -266,11 +289,11 @@ async function exportPrintPDF(design, list, name, onProgress, searchable = true)
   for (let k = 0; k < list.length; k++) {
     onProgress(k, list.length);
     if (k > 0) pdf.addPage([pw, ph], orientation);
-    const url = await pageToDataURL(design, list[k].page.json, { format: 'jpeg', multiplier, quality: 0.95, bleed: Math.round(bleedMM * pxPerMM) });
+    const url = await pageToDataURL(design, list[k].page, { format: 'jpeg', multiplier, quality: 0.95, bleed: Math.round(bleedMM * pxPerMM) });
     pdf.addImage(url, 'JPEG', slugMM, slugMM, tw + 2 * bleedMM, th + 2 * bleedMM, undefined, 'FAST');
     const f = tw / design.width, o = slugMM + bleedMM;
-    if (searchable) await addTextLayer(pdf, design, list[k].page.json, f, o, o, 72 / 25.4);
-    for (const l of await pageLinks(design, list[k].page.json)) pdf.link(o + l.left * f, o + l.top * f, l.width * f, l.height * f, { url: l.url });
+    if (searchable) await addTextLayer(pdf, design, list[k].page, f, o, o, 72 / 25.4);
+    for (const l of await pageLinks(design, list[k].page)) pdf.link(o + l.left * f, o + l.top * f, l.width * f, l.height * f, { url: l.url });
     // crop marks at the trim edges, drawn in the slug area
     pdf.setDrawColor(0);
     pdf.setLineWidth(0.25);
@@ -292,7 +315,7 @@ async function exportCmykPDF(design, list, name, onProgress) {
   const pages = [];
   for (let k = 0; k < list.length; k++) {
     onProgress(k, list.length);
-    const sc = await renderPage(design, list[k].page.json, { forceBg: '#ffffff', bleed: Math.round(3 * pxPerMM) });
+    const sc = await renderPage(design, list[k].page, { forceBg: '#ffffff', bleed: Math.round(3 * pxPerMM) });
     const canvas = sc.toCanvasElement(multiplier);
     sc.dispose();
     pages.push({ canvas, trimW: tw, trimH: th, bleed: 3, slug: 8 });
