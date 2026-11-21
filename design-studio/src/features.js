@@ -418,6 +418,7 @@ export const features = {
   },
 
   async replaceImage(old, url) {
+    if (old && old.decoFrame) return this.fillDecoFrame(old, url);
     try {
       const img = await FabricImage.fromURL(url, { crossOrigin: 'anonymous' });
       // target box = the old picture without its border; keep the border's visual thickness
@@ -425,6 +426,8 @@ export const features = {
       const sw = old.strokeWidth ? (old.strokeWidth * old.scaleX) / img.scaleX : 0;
       img.set({ angle: old.angle, flipX: old.flipX, flipY: old.flipY, opacity: old.opacity, shadow: old.shadow, stroke: old.stroke, strokeWidth: sw, name: old.placeholder ? 'รูปในกรอบ' : old.name });
       if (old.placeholder || old.mask || old.frame) img.frame = true;
+      if (old.maskText) img.maskText = { ...old.maskText };
+      if (old.maskR) img.maskR = old.maskR;
       this.applyMask(img, old.mask);
       const c = old.getCenterPoint();
       const idx = this.canvas.getObjects().indexOf(old);
@@ -444,7 +447,7 @@ export const features = {
 
   pickReplaceImage() {
     const a = this.canvas.getActiveObject();
-    if (!isImage(a)) return;
+    if (!isImage(a) && !(a && a.decoFrame)) return;
     const inp = document.createElement('input');
     inp.type = 'file';
     inp.accept = 'image/*';
@@ -459,7 +462,7 @@ export const features = {
   },
 
   imageAt(pt) {
-    return this.canvas.getObjects().slice().reverse().find((o) => isImage(o) && o.visible && !o.locked && o.containsPoint(pt));
+    return this.canvas.getObjects().slice().reverse().find((o) => (isImage(o) || o.decoFrame) && o.visible && !o.locked && o.containsPoint(pt));
   },
 
   // ------------------------------------------------------------ text extras

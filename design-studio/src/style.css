@@ -652,3 +652,4 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 .mask-grid button .mask-svg svg { width: 100%; height: 100%; }
 .crop-zoom { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); } .crop-zoom input { width: 110px; }
 .el-grid.frames { grid-template-columns: repeat(4, 1fr); }
+.tf-prev { font-size: 64px; text-align: center; padding: 12px; margin: 10px 0; border-radius: 12px; background: linear-gradient(135deg, #22c3e6, #7c5cff, #ff5fa2); -webkit-background-clip: text; background-clip: text; color: transparent; min-height: 90px; line-height: 1.2; overflow: hidden; white-space: nowrap; }

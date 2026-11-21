@@ -171,7 +171,7 @@ function meanDiff(a, b) {
     return route.fulfill({ contentType: 'image/png', body: fs.readFileSync(u.includes('scene') ? ILL_S : ILL_A) });
   });
   page.setDefaultTimeout(10000);
-  page.on('pageerror', (e) => pageErrors.push(e.message));
+  page.on('pageerror', (e) => { pageErrors.push(e.message); if (process.env.DBG) console.log('PAGEERROR', section, (e.stack || '').split('\n').slice(0, 5).join(' | ')); });
   if (process.env.DBG) page.on('console', (m) => { if (m.text().startsWith('DBG')) console.log('      ', m.text().slice(0, 300)); });
   page.on('dialog', (d) => d.dismiss());
 
@@ -1105,7 +1105,9 @@ function meanDiff(a, b) {
     await page.click('[data-act="crop-mode"]');
     const z0 = await ev(() => [__lai.canvas.getObjects().find((o) => !o.cropUI).scaleX, __lai._crop.img.width]);
     await page.$eval('[data-crop-zoom]', (r) => { r.value = 200; r.dispatchEvent(new Event('input', { bubbles: true })); });
-    const g = await ev(() => { const g = __lai._crop.ghost; g.setCoords(); const r = __lai.canvas.upperCanvasEl.getBoundingClientRect(); const p = g.oCoords.tl; return { x: r.left + p.x + 8, y: r.top + p.y + 8 }; });
+    assert(await ev(() => __lai._crop.frameMode === 'triangle' && __lai.canvas.getActiveObject() === __lai._crop.ghost), 'frame mode: the picture is active, the frame is fixed');
+    // in a frame the picture's corners scale it, so grab it in the middle
+    const g = await ev(() => { const f = __lai._crop.frame; const r = __lai.canvas.upperCanvasEl.getBoundingClientRect(); const c = f.getCenterPoint(); const v = __lai.canvas.viewportTransform; return { x: r.left + c.x * v[0] + v[4], y: r.top + (c.y + 20) * v[3] + v[5] }; });
     await page.mouse.move(g.x, g.y); await page.mouse.down(); await page.mouse.move(g.x + 30, g.y + 20, { steps: 5 }); await page.mouse.up();
     await page.keyboard.press('Enter');
     await wait(150);
@@ -1157,6 +1159,141 @@ function meanDiff(a, b) {
     await clearPage();
     await panel('elements');
     if (await page.$('.el-view-head [data-el-view=""]')) await page.click('.el-view-head [data-el-view=""]'); // back to the main elements view
+  });
+  await step('ปรับรูปในกรอบแบบ Canva: ดับเบิลคลิก ลากเลือกส่วนที่แสดง ลากมุมย่อ/ขยาย ล้อเมาส์ซูม พอดีกรอบ เอาออกจากกรอบ', async () => {
+    await clearPage();
+    await ev(async (b64) => {
+      const f = await __lai.addFrame(8); if (f.mask !== 'triangle') throw new Error('frame 8 ' + f.mask); await __lai.replaceImage(f, 'data:image/png;base64,' + b64);
+    }, fs.readFileSync(IMG).toString('base64'));
+    await page.waitForFunction(() => __lai.canvas.getObjects().length === 1 && !__lai.canvas.getObjects()[0].placeholder);
+    const acts = await page.$$eval('[data-ctx] [data-act]', (e) => e.map((x) => x.dataset.act));
+    assert(acts.includes('crop-mode') && acts.includes('frame-detach'), 'frame toolbar ' + acts);
+    const c0 = await screenPoint(0);
+    await page.mouse.dblclick(c0.x, c0.y);
+    await page.waitForFunction(() => __lai._crop && __lai._crop.frameMode);
+    assert(await ev(() => __lai.canvas.getActiveObject() === __lai._crop.ghost && !__lai._crop.frame.evented), 'picture active, frame fixed');
+    // wheel zooms the picture (not the page)
+    const pz = await ev(() => __lai.canvas.getZoom());
+    await page.mouse.move(c0.x, c0.y); await page.mouse.wheel(0, -300); await wait(150);
+    assert(await ev((pz) => __lai._crop.zoom > 1.05 && __lai.canvas.getZoom() === pz, pz), 'wheel zoom');
+    assert(+(await page.$eval('[data-crop-zoom]', (e) => e.value)) > 105, 'slider follows wheel');
+    // drag the picture: it moves, the frame does not
+    const f0 = await ev(() => [__lai._crop.frame.left, __lai._crop.frame.top].map(Math.round).join());
+    const g0 = await ev(() => [__lai._crop.ghost.left, __lai._crop.ghost.top]);
+    await page.mouse.move(c0.x, c0.y); await page.mouse.down(); await page.mouse.move(c0.x + 40, c0.y + 30, { steps: 8 }); await page.mouse.up(); await wait(150);
+    const g1 = await ev(() => [__lai._crop.ghost.left, __lai._crop.ghost.top]);
+    assert(g1[0] !== g0[0] || g1[1] !== g0[1], 'picture moved');
+    assert((await ev(() => [__lai._crop.frame.left, __lai._crop.frame.top].map(Math.round).join())) === f0, 'frame fixed');
+    // corner handle: uniform scale
+    const br = await ev(() => { const g = __lai._crop.ghost; g.setCoords(); const r = __lai.canvas.upperCanvasEl.getBoundingClientRect(); return { x: r.left + g.oCoords.br.x, y: r.top + g.oCoords.br.y }; });
+    const s0 = await ev(() => __lai._crop.ghost.scaleX);
+    await page.mouse.move(br.x, br.y); await page.mouse.down(); await page.mouse.move(br.x + 60, br.y + 60, { steps: 8 }); await page.mouse.up(); await wait(150);
+    const s1 = await ev(() => [__lai._crop.ghost.scaleX, __lai._crop.ghost.scaleY]);
+    assert(s1[0] > s0 * 1.05 && Math.abs(s1[0] - s1[1]) < 1e-9, `corner scale ${s0} → ${s1}`);
+    // never smaller than the frame
+    await ev(() => __lai.cropZoom(0.1));
+    assert(await ev(() => { const { frame: f, ghost: g } = __lai._crop; return g.width * g.scaleX >= f.width * f.scaleX - 0.5 && g.height * g.scaleY >= f.height * f.scaleY - 0.5; }), 'covers the frame');
+    await ev(() => __lai.cropZoom(2));
+    await page.click('[data-act="crop-fit"]');
+    assert(Math.abs((await ev(() => __lai._crop.zoom)) - 1) < 0.01, 'fit');
+    await ev(() => __lai.cropZoom(1.5));
+    await page.click('[data-act="crop-done"]');
+    await page.waitForFunction(() => !__lai._crop);
+    assert(await ev(() => { const o = __lai.canvas.getObjects(); return o.length === 1 && o[0].frame && !!o[0].clipPath; }), 'one framed picture after adjust');
+    // take it out of the frame: empty frame + the picture
+    await page.click('[data-ctx] [data-act="frame-detach"]');
+    await page.waitForFunction(() => __lai.canvas.getObjects().length === 2);
+    const parts = await ev(() => __lai.canvas.getObjects().map((o) => [!!o.placeholder, !!o.clipPath].join()));
+    assert(parts[0] === 'true,true' && parts[1] === 'false,false', 'detached ' + parts);
+    await page.keyboard.press('Control+z'); await wait(300);
+    assert((await objCount()) === 1, 'undo detach');
+    await clearPage();
+  });
+  await step('รูปทรงทั้ง 175 แบบ (ดาว หัวใจ ตัวอักษร ก–ฮ ฯลฯ) ใช้เป็นรูปทรงธรรมดา: ใส่สี และดับเบิลคลิกพิมพ์ข้อความข้างใน', async () => {
+    await clearPage();
+    await panel('elements');
+    await ev(() => { __lai._elView = 'shapes'; __lai.renderPanel(); });
+    await page.waitForSelector('.el-view [data-act^="gfx:fr|"]');
+    assert((await page.$$('.el-view [data-act^="gfx:fr|"]')).length >= 175, 'frame shapes listed as shapes');
+    await page.click('.el-view [data-act="gfx:fr|heart"], .el-view [data-act^="gfx:fr|"]');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.type === 'path');
+    assert(await ev(() => { const o = __lai.canvas.getActiveObject(); return !!o.fill && !o.clipPath; }), 'a filled shape, not a frame');
+    const p = await screenPoint(0);
+    await page.mouse.dblclick(p.x, p.y);
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.isEditing);
+    await page.keyboard.type('ลดราคา');
+    await ev(() => __lai.canvas.getActiveObject().exitEditing());
+    await wait(200);
+    const r = await ev(() => { const o = __lai.canvas.getObjects(); return [o.length, o[0].shapeText, o[0].getObjects?.()[1]?.text]; });
+    assert(r[0] === 1 && r[1] && r[2] === 'ลดราคา', 'shape + text ' + r);
+    await ev(() => { __lai._elView = ''; __lai.renderPanel(); });
+    await clearPage();
+  });
+  await step('กรอบรูปจากข้อความ: พิมพ์คำ เลือกฟอนต์ได้ (ไม่จำกัดแค่ Kanit) ใส่รูป แก้ข้อความ บันทึกแล้วเปิดใหม่', async () => {
+    await clearPage();
+    await panel('elements');
+    await ev(() => { __lai._elView = 'frames'; __lai.renderPanel(); });
+    await page.click('[data-act="frame-text"]');
+    await page.fill('[data-tf-text]', 'ทะเล');
+    const fonts = await page.$$eval('[data-tf-font] option', (e) => e.map((x) => x.value));
+    assert(fonts.length >= 10, 'font choices ' + fonts.length);
+    const font = fonts.includes('Sriracha') ? 'Sriracha' : fonts[2];
+    await page.selectOption('[data-tf-font]', font);
+    await page.click('.modal [data-go]');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.mask === 'text', null, { timeout: 10000 });
+    assert(await ev((font) => { const o = __lai.canvas.getActiveObject(); return o.placeholder && o.clipPath.type === 'text' && o.clipPath.fontFamily === font && o.clipPath.text === 'ทะเล'; }, font), 'text clip with chosen font');
+    await ev(async (b64) => { await __lai.replaceImage(__lai.canvas.getActiveObject(), 'data:image/png;base64,' + b64); }, fs.readFileSync(IMG).toString('base64'));
+    assert(await ev((font) => { const o = __lai.canvas.getObjects()[0]; return !o.placeholder && o.mask === 'text' && o.maskText.font === font && o.clipPath.text === 'ทะเล'; }, font), 'photo keeps the letters');
+    await page.click('[data-ctx] [data-act="frame-text-edit"]');
+    await page.fill('[data-tf-text]', 'SEA');
+    await page.click('.modal [data-go]');
+    await page.waitForFunction(() => __lai.canvas.getObjects()[0].clipPath?.text === 'SEA');
+    await ev(() => __lai.commit());
+    await ev(() => __lai.loadPage(__lai.cur));
+    await wait(500);
+    assert(await ev((font) => { const o = __lai.canvas.getObjects()[0]; return o.mask === 'text' && o.clipPath?.text === 'SEA' && o.clipPath.fontFamily === font; }, font), 'text frame after reload');
+    await ev(() => { __lai._elView = ''; __lai.renderPanel(); });
+    await clearPage();
+  });
+  await step('กรอบตกแต่ง 14 แบบ (โพลารอยด์ ฟิล์ม มือถือ แล็ปท็อป เบราว์เซอร์ แสตมป์ ฯลฯ): ลากรูปมาใส่ ดับเบิลคลิกปรับรูป ย้อนกลับ บันทึก ส่งออก', async () => {
+    await clearPage();
+    await panel('elements');
+    await ev(() => { __lai._elView = 'frames'; __lai.renderPanel(); });
+    const tiles = await page.$$eval('[data-act^="deco:"]', (e) => e.map((x) => x.dataset.act));
+    assert(tiles.length >= 14, 'deco tiles ' + tiles.length);
+    for (const t of tiles) { await page.click(`[data-act="${t}"]`); await wait(60); }
+    assert(await ev((n) => { const o = __lai.canvas.getObjects(); return o.length === n && o.every((g) => g.type === 'group' && g.decoFrame && g.getObjects().some((x) => x.decoPhoto && x.placeholder)); }, tiles.length), 'all deco frames added with an empty slot');
+    await clearPage();
+    await page.click('[data-act="deco:polaroid"]');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.decoFrame === 'polaroid');
+    assert(await page.$('[data-ctx] [data-act="replace-img"]'), 'deco toolbar');
+    // drag a picture that is on the page onto the polaroid
+    await ev(async (b64) => { const g = __lai.canvas.getObjects()[0]; g.setPositionByOrigin({ x: __lai.W * 0.3, y: __lai.H * 0.4 }, 'center', 'center'); g.setCoords(); await __lai.addImage('data:image/png;base64,' + b64, 'p'); const o = __lai.canvas.getActiveObject(); o.set({ scaleX: 0.25, scaleY: 0.25 }); o.setPositionByOrigin({ x: __lai.W * 0.8, y: __lai.H * 0.8 }, 'center', 'center'); o.setCoords(); __lai.commit(); }, fs.readFileSync(IMG).toString('base64'));
+    const [a, b] = [await screenPoint(1), await screenPoint(0)];
+    await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y - 10, { steps: 12 });
+    assert(await ev(() => __lai._dropFrame?.decoFrame === 'polaroid'), 'polaroid highlighted');
+    await page.mouse.up();
+    await page.waitForFunction(() => { const o = __lai.canvas.getObjects(); return o.length === 1 && o[0].getObjects().some((x) => x.decoPhoto && !x.placeholder); });
+    // double-click: adjust the photo inside, then it goes back into the polaroid
+    const gc = await screenPoint(0);
+    await page.mouse.dblclick(gc.x, gc.y - 10);
+    await page.waitForFunction(() => __lai._crop && __lai._crop.deco && __lai._crop.frameMode);
+    await ev(() => __lai.cropZoom(2));
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => !__lai._crop);
+    const st = await ev(() => { const o = __lai.canvas.getObjects(); const g = o[0]; const ph = g.getObjects().find((x) => x.decoPhoto); return [o.length, g.decoFrame, g.getObjects().indexOf(ph), ph.frame, __lai.canvas.getActiveObject() === g]; });
+    assert(st.join() === '1,polaroid,1,true,true', 'photo back in the polaroid ' + st);
+    await page.keyboard.press('Control+z'); await wait(300);
+    assert(await ev(() => { const o = __lai.canvas.getObjects(); return o.length === 1 && o[0].decoFrame === 'polaroid'; }), 'undo keeps one polaroid');
+    await page.keyboard.press('Control+y'); await wait(300);
+    await ev(() => __lai.commit());
+    await ev(() => __lai.loadPage(__lai.cur));
+    await wait(500);
+    assert(await ev(() => { const g = __lai.canvas.getObjects()[0]; return g.decoFrame === 'polaroid' && g.getObjects().some((x) => x.decoPhoto && x.frame && !x.placeholder); }), 'deco frame after reload');
+    const png = await exportAs('png');
+    assert(isPNG(png), 'png export');
+    await ev(() => { __lai._elView = ''; __lai.renderPanel(); });
+    await clearPage();
   });
   await step('ตารางรูป (กริด) 6 แบบ ช่องไม่ล้นหน้า', async () => {
     await clearPage();

@@ -99,6 +99,7 @@ export function fontsInJSON(json) {
     if (!o) return;
     if (o.fontFamily) out.add(o.fontFamily);
     (o.objects || []).forEach(walk);
+    if (o.clipPath) walk(o.clipPath); // text frames clip a picture with text
   };
   (json.objects || []).forEach(walk);
   return [...out];

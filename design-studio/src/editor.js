@@ -18,8 +18,9 @@ import { Vignette, warmthMatrix, tintMatrix, duotoneMatrix, sharpen } from './fi
 import { fileToDataURL } from './imageutil.js';
 import { features, SMART_LABEL, BRAND_FONT_KINDS } from './features.js';
 import { rulers } from './rulers.js';
-import { FRAMES, GRIDS, MOCKUPS, CHART_TYPES } from './smart.js';
+import { FRAMES, GRIDS, MOCKUPS, CHART_TYPES, placeholderImage } from './smart.js';
 import { FRAME_SHAPES, FRAME_CATEGORIES, isFrameShape, frameClipPath, framePreview } from './frames.js';
+import { DECO_FRAMES, decoFrame, decoPreview } from './decoframes.js';
 
 const CHART_ICON = { bar: '📊', 'bar-group': '📊', 'bar-stack': '▥', 'bar-stack100': '▥', hbar: '☰', 'hbar-group': '☰', 'hbar-stack': '☰', waterfall: '⛲', lollipop: '🍭',
   line: '📈', 'line-multi': '📈', 'line-smooth': '〰', step: '⌐', area: '◭', 'area-stack': '◭', pie: '◔', donut: '◎', halfdonut: '◠', polar: '✿', radial: '◉',
@@ -41,7 +42,7 @@ Object.assign(InteractiveFabricObject.ownDefaults, {
   padding: 2,
 });
 
-const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder', 'link', 'alt', 'autoPage', 'shapeText', 'autoToc', 'graphic', 'frame'];
+const EXTRA = ['name', 'locked', 'adj', 'crop', 'mask', 'smart', 'curve', 'listType', 'placeholder', 'link', 'alt', 'autoPage', 'shapeText', 'autoToc', 'graphic', 'frame', 'maskText', 'maskR', 'decoFrame', 'decoPhoto'];
 export const BLANK_PAGE = (bg = '#ffffff') => JSON.stringify({ version: '6.9.1', objects: [], background: bg });
 
 const COLORS = [
@@ -281,6 +282,11 @@ export class Editor {
       const t = e.target;
       if (t && t.cropUI) return this.endCrop(true);
       if (!t || t.locked) return;
+      if (t.decoFrame) {
+        const ph = this.decoPhotoOf(t);
+        if (ph && ph.placeholder) return this.pickReplaceImage();
+        return this.startDecoCrop(t);
+      }
       if (t.smart) this.openSmartEditor(t);
       else if (t.shapeText || this.canHoldText(t)) this.editShapeText(t);
       else if (isImage(t) && t.placeholder) this.pickReplaceImage();
@@ -318,12 +324,19 @@ export class Editor {
     });
     frame.setControlsVisibility({ mtr: false });
     ghost.ghost = true; frame.frame = true;
+    // a picture in a frame: like Canva the frame stays put; the picture is dragged and scaled from its corners
+    const frameMode = this.isFrame(img);
+    if (frameMode) {
+      frame.set({ selectable: false, evented: false, stroke: '#7c3aed', strokeWidth: 2, strokeUniform: true, strokeDashArray: [8, 5] });
+      ghost.set({ hasControls: true, lockScalingX: false, lockScalingY: false, opacity: 0.5, borderColor: '#7c3aed', cornerColor: '#ffffff', cornerStrokeColor: '#7c3aed', transparentCorners: false, cornerSize: 14, cornerStyle: 'circle' });
+      ghost.setControlsVisibility({ mtr: false, ml: false, mr: false, mt: false, mb: false });
+    }
     img.set({ evented: false, selectable: false });
     c.discardActiveObject();
-    this._crop = { img, ghost, frame, saved, sx, sy, sx0: sx, sy0: sy, zoom: 1, nw, nh, ratio: 0 };
+    this._crop = { img, ghost, frame, saved, sx, sy, sx0: sx, sy0: sy, zoom: 1, nw, nh, ratio: 0, frameMode };
     c.insertAt(c.getObjects().indexOf(img), ghost);
     c.add(frame);
-    c.setActiveObject(frame);
+    c.setActiveObject(frameMode ? ghost : frame);
     c.requestRenderAll();
     this.renderCtx();
   }
@@ -336,7 +349,18 @@ export class Editor {
     const gw = g.width * g.scaleX, gh = g.height * g.scaleY;
     if (t === g) {
       const fw = f.width * f.scaleX, fh = f.height * f.scaleY;
-      g.set({ left: Math.min(f.left, Math.max(f.left + fw - gw, g.left)), top: Math.min(f.top, Math.max(f.top + fh - gh, g.top)) });
+      if (mode === 'scale') {
+        // corner-scaling the picture: keep it at least as big as the frame, and uniform
+        const sMin = Math.max(fw / g.width, fh / g.height);
+        const s = Math.max(sMin, g.scaleX);
+        if (s !== g.scaleX || g.scaleY !== s) g.set({ scaleX: s, scaleY: s });
+        k.sx = k.sy = s;
+        k.zoom = s / k.sx0;
+        const zr = this.$('[data-crop-zoom]');
+        if (zr) zr.value = Math.round(k.zoom * 100);
+      }
+      const gw2 = g.width * g.scaleX, gh2 = g.height * g.scaleY;
+      g.set({ left: Math.min(f.left, Math.max(f.left + fw - gw2, g.left)), top: Math.min(f.top, Math.max(f.top + fh - gh2, g.top)) });
     } else {
       const min = 8;
       let x1 = f.left, y1 = f.top, x2 = f.left + f.width * f.scaleX, y2 = f.top + f.height * f.scaleY;
@@ -416,6 +440,183 @@ export class Editor {
     return z;
   }
 
+  /** Picture exactly covers the frame, centred (like a fresh drop). */
+  cropFit() {
+    const k = this._crop;
+    if (!k) return;
+    const { ghost: g, frame: f, nw, nh } = k;
+    const fw = f.width * f.scaleX, fh = f.height * f.scaleY;
+    const s = Math.max(fw / nw, fh / nh);
+    k.sx = k.sy = s; k.zoom = s / k.sx0;
+    g.set({ scaleX: s, scaleY: s, left: f.left + fw / 2 - (nw * s) / 2, top: f.top + fh / 2 - (nh * s) / 2 });
+    const zr = this.$('[data-crop-zoom]');
+    if (zr) zr.value = Math.round(k.zoom * 100);
+    this.clampCrop(g, 'move');
+  }
+
+  // ---------------------------------------------------------------- decorated frames (polaroid, film, devices)
+  decoPhotoOf(g) {
+    return g && g.decoFrame && g.getObjects ? g.getObjects().find((o) => o.decoPhoto) : null;
+  }
+
+  async addDecoFrame(k) {
+    const def = decoFrame(k);
+    if (!def) return;
+    const spec = def.build();
+    const u = (this.U * 0.42) / Math.max(spec.w, spec.h);
+    const mk = (p) => {
+      const o = { left: p.x * u, top: p.y * u, fill: p.fill, opacity: p.opacity ?? 1, angle: p.angle || 0, objectCaching: false };
+      let obj;
+      if (p.t === 'circle') obj = new Circle({ ...o, radius: (p.w * u) / 2 });
+      else if (p.t === 'path') {
+        obj = new Path(p.d, { ...o, scaleX: u, scaleY: u });
+        // a path is placed by its own bounding box
+        obj.set({ left: (obj.pathOffset.x - obj.width / 2) * u, top: (obj.pathOffset.y - obj.height / 2) * u });
+      } else if (p.angle) {
+        // rotated strips (tape) turn around their own centre
+        obj = new Rect({ ...o, originX: 'center', originY: 'center', left: (p.x + p.w / 2) * u, top: (p.y + p.h / 2) * u, width: p.w * u, height: p.h * u, rx: (p.r || 0) * u, ry: (p.r || 0) * u });
+      } else obj = new Rect({ ...o, width: p.w * u, height: p.h * u, rx: (p.r || 0) * u, ry: (p.r || 0) * u });
+      if (p.shadow) obj.set('shadow', new Shadow({ ...p.shadow, blur: p.shadow.blur * u * 2, offsetY: p.shadow.offsetY * u * 2 }));
+      return obj;
+    };
+    const under = spec.under.map(mk);
+    const photo = await FabricImage.fromURL(placeholderImage());
+    const ph = spec.photo;
+    this.coverCrop(photo, ph.w * u, ph.h * u);
+    photo.set({ left: ph.x * u, top: ph.y * u, name: 'รูปในกรอบ', placeholder: true });
+    photo.frame = true;
+    photo.decoPhoto = true;
+    if (ph.r) { photo.maskR = ph.r / Math.min(ph.w, ph.h); this.applyMask(photo, 'rr'); }
+    else if (ph.mask) this.applyMask(photo, ph.mask);
+    const over = spec.over.map(mk);
+    const g = new Group([...under, photo, ...over], { name: 'กรอบ' + def.label });
+    g.decoFrame = k;
+    if (spec.angle) g.rotate(spec.angle);
+    this.addObject(g);
+    return g;
+  }
+
+  /** Fill the photo slot of a decorated frame with a new picture (keeps the slot's size and shape). */
+  async fillDecoFrame(g, url) {
+    const old = this.decoPhotoOf(g);
+    if (!old) return;
+    try {
+      const img = await FabricImage.fromURL(url, { crossOrigin: 'anonymous' });
+      const index = g.getObjects().indexOf(old);
+      g.remove(old); // back in the page's plane, with its real size
+      this.coverCrop(img, old.width * old.scaleX, old.height * old.scaleY);
+      img.set({ angle: old.angle, name: 'รูปในกรอบ' });
+      img.frame = true;
+      img.decoPhoto = true;
+      img.maskR = old.maskR;
+      this.applyMask(img, old.mask);
+      img.setPositionByOrigin(old.getCenterPoint(), 'center', 'center');
+      g.insertAt(index, img);
+      g.set('dirty', true);
+      g.setCoords();
+      this.canvas.setActiveObject(g);
+      this.canvas.requestRenderAll();
+      this.commit();
+      this.renderCtx();
+      return g;
+    } catch (e) {
+      console.error(e);
+      toast('ใส่รูปในกรอบไม่สำเร็จ', 'error');
+    }
+  }
+
+  /** Adjust the photo of a decorated frame: lift it out of the group, run the frame crop, put it back. */
+  startDecoCrop(g) {
+    const ph = this.decoPhotoOf(g);
+    if (!ph || ph.placeholder || this._crop || g.locked) return;
+    const c = this.canvas;
+    const index = g.getObjects().indexOf(ph);
+    c.discardActiveObject();
+    g.remove(ph);
+    c.insertAt(c.getObjects().indexOf(g) + 1, ph);
+    ph.setCoords();
+    this.startCrop(ph);
+    if (!this._crop) { c.remove(ph); g.insertAt(index, ph); g.setCoords(); c.setActiveObject(g); c.requestRenderAll(); return; }
+    this._crop.deco = { group: g, index };
+  }
+
+  /** A frame shaped like typed text in any font (the picture shows through the letters). */
+  openTextFrame(edit = null) {
+    const cur = edit?.maskText || { text: 'LOVE', font: 'Kanit', bold: true };
+    const m = modal({
+      title: edit ? 'แก้ไขกรอบข้อความ' : 'สร้างกรอบรูปจากข้อความ',
+      body: `<div class="tf">
+        <p class="hint">พิมพ์คำ เลือกฟอนต์ แล้วลากรูปไปวางบนกรอบ รูปจะแสดงผ่านตัวอักษร (ใช้ได้ทั้งไทยและอังกฤษ)</p>
+        <label class="field">ข้อความ <input class="input full" data-tf-text maxlength="20" value="${esc(cur.text)}"></label>
+        <div class="row-gap"><label class="field grow">ฟอนต์ <select class="input" data-tf-font>${FONTS.map(([f]) => `<option ${f === cur.font ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select></label>
+        <label class="chk"><input type="checkbox" data-tf-bold ${cur.bold === false ? '' : 'checked'}> ตัวหนา</label></div>
+        <div class="tf-prev" data-tf-prev></div>
+        <div class="modal-actions"><button class="btn" data-no>ยกเลิก</button><button class="btn primary" data-go>${edit ? 'บันทึก' : 'สร้างกรอบ'}</button></div></div>`,
+    });
+    const el = m.el;
+    const val = () => ({ text: el.querySelector('[data-tf-text]').value.trim().slice(0, 20) || 'A', font: el.querySelector('[data-tf-font]').value, bold: el.querySelector('[data-tf-bold]').checked });
+    const prev = () => { const v = val(); ensureFont(v.font).then(() => { const p = el.querySelector('[data-tf-prev]'); p.style.fontFamily = `'${v.font}'`; p.style.fontWeight = v.bold ? 800 : 400; p.textContent = v.text; }); };
+    el.addEventListener('input', prev);
+    el.addEventListener('change', prev);
+    prev();
+    el.querySelector('[data-no]').onclick = () => m.close();
+    el.querySelector('[data-go]').onclick = async () => {
+      const v = val();
+      m.close();
+      await Promise.race([ensureFont(v.font), new Promise((r) => setTimeout(r, 3000))]);
+      const probe = new FabricText(v.text, { fontFamily: v.font, fontWeight: v.bold ? 'bold' : 'normal', fontSize: 200 });
+      const ratio = probe.width / probe.height;
+      if (edit) {
+        const w = edit.width * edit.scaleX;
+        edit.maskText = v;
+        this.coverCrop(edit, w, w / ratio);
+        this.applyMask(edit, 'text');
+        edit.setCoords();
+        this.canvas.requestRenderAll();
+        this.commit();
+        return;
+      }
+      const img = await FabricImage.fromURL(placeholderImage());
+      const w = Math.min(this.W * 0.8, this.U * 0.25 * ratio);
+      this.coverCrop(img, w, w / ratio);
+      img.set({ name: `กรอบข้อความ ${v.text}`, placeholder: true });
+      img.frame = true;
+      img.maskText = v;
+      this.applyMask(img, 'text');
+      this.addObject(img);
+    };
+  }
+
+  /** Take the picture out of its frame: the frame becomes empty again, the picture sits next to it. */
+  async detachFromFrame(img) {
+    if (!img || !this.isFrame(img) || img.placeholder) return;
+    const c = this.canvas;
+    const pic = await FabricImage.fromURL(img.getSrc(), { crossOrigin: 'anonymous' });
+    const k = img.getScaledWidth() / pic.width;
+    const ph = await FabricImage.fromURL(placeholderImage());
+    this.coverCrop(ph, img.width * img.scaleX, img.height * img.scaleY);
+    ph.set({ angle: img.angle, opacity: img.opacity, shadow: img.shadow, name: 'กรอบรูป', placeholder: true });
+    ph.frame = true;
+    if (img.maskText) ph.maskText = { ...img.maskText };
+    if (img.maskR) ph.maskR = img.maskR;
+    this.applyMask(ph, img.mask);
+    const center = img.getCenterPoint();
+    const idx = c.getObjects().indexOf(img);
+    c.remove(img);
+    c.insertAt(idx, ph);
+    ph.setPositionByOrigin(center, 'center', 'center');
+    ph.setCoords();
+    pic.set({ scaleX: k, scaleY: k, name: 'รูปภาพ' });
+    pic.setPositionByOrigin(new Point(center.x + this.U * 0.06, center.y + this.U * 0.06), 'center', 'center');
+    c.add(pic);
+    pic.setCoords();
+    c.setActiveObject(pic);
+    c.requestRenderAll();
+    this.commit();
+    toast('เอารูปออกจากกรอบแล้ว กรอบกลับเป็นกรอบว่าง');
+    return pic;
+  }
+
   cropReset() {
     const k = this._crop;
     if (!k) return;
@@ -456,8 +657,18 @@ export class Editor {
     img.setCoords();
     c.remove(ghost, frame);
     this._crop = null;
+    let back = img;
+    if (k.deco) {
+      // the photo was lifted out of its decorated frame for adjusting: put it back in place
+      const { group: g, index } = k.deco;
+      c.remove(img);
+      g.insertAt(index, img);
+      g.set('dirty', true);
+      g.setCoords();
+      back = g;
+    }
     c.discardActiveObject();
-    c.setActiveObject(nextActive && nextActive.canvas ? nextActive : img);
+    c.setActiveObject(nextActive && nextActive.canvas ? nextActive : back);
     c.requestRenderAll();
     if (apply) this.commit();
     this.renderCtx();
@@ -990,6 +1201,14 @@ export class Editor {
       } else this.handleFiles(files, true);
     });
     ws.addEventListener('wheel', (e) => {
+      if (this._crop && !(e.ctrlKey || e.metaKey)) {
+        // adjusting a picture: the wheel zooms the picture, not the page
+        e.preventDefault();
+        const z = this.cropZoom((this._crop.zoom || 1) * (e.deltaY < 0 ? 1.08 : 1 / 1.08));
+        const zr = this.$('[data-crop-zoom]');
+        if (zr && z) zr.value = Math.round(z * 100);
+        return;
+      }
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         this.setZoom(this.zoom * (e.deltaY < 0 ? 1.1 : 0.9));
@@ -1510,7 +1729,13 @@ export class Editor {
       ${btn('delete', 'trash', 'ลบ (Delete)')}`;
     let html = '';
     if (this._crop) {
-      bar.innerHTML = `<span class="ctx-label">✂ ลากขอบกรอบเพื่อครอบตัด · ลากรูปจางเพื่อเลื่อนตำแหน่งรูป</span>
+      const fm = this._crop.frameMode;
+      bar.innerHTML = fm ? `<span class="ctx-label">🖼 ลากรูปเพื่อเลือกส่วนที่จะแสดงในกรอบ · ลากมุมรูป / หมุนล้อเมาส์ / แถบซูม เพื่อย่อ-ขยาย</span>
+        <label class="crop-zoom" title="ซูมรูปในกรอบ">${icon('zoomIn', 16)}<input type="range" min="20" max="400" step="1" value="${Math.round((this._crop.zoom || 1) * 100)}" data-crop-zoom aria-label="ซูมรูปในกรอบ"></label>
+        <button class="tool" data-act="crop-fit" title="ให้รูปพอดีกรอบ (เต็มกรอบ กึ่งกลาง)"><span>พอดีกรอบ</span></button>
+        <span class="grow"></span>
+        <button class="tool" data-act="crop-cancel" title="ยกเลิก (Esc)"><span>ยกเลิก</span></button>
+        <button class="btn primary sm" data-act="crop-done" title="เสร็จสิ้น (Enter)">เสร็จสิ้น</button>` : `<span class="ctx-label">✂ ลากขอบกรอบเพื่อครอบตัด · ลากรูปจางเพื่อเลื่อนตำแหน่งรูป</span>
         ${btn('crop-ratio:0', 'crop', 'อิสระ', false, 'อิสระ')}
         <button class="tool" data-act="crop-ratio:1" title="จัตุรัส"><span>1:1</span></button>
         <button class="tool" data-act="crop-ratio:1.7778" title="16:9"><span>16:9</span></button>
@@ -1556,6 +1781,12 @@ export class Editor {
         <button class="font-btn" data-act="pop:font" title="แบบอักษร" style="font-family:'${esc(tx.fontFamily)}'">${esc(tx.fontFamily)} ${icon('down', 14)}</button>
         ${btn('ungroup', 'ungroup', 'แยกข้อความออกจากรูปทรง', false, 'แยก')}
         ${common()}`;
+    } else if (kind === 'group' && a.decoFrame) {
+      const ph = this.decoPhotoOf(a);
+      html = `<span class="ctx-label">🖼 กรอบ${esc(decoFrame(a.decoFrame)?.label || '')}</span>
+        ${ph && !ph.placeholder ? btn('deco-adjust', 'crop', 'ปรับรูปในกรอบ: ลากเลือกส่วนที่แสดง ย่อ/ขยาย (ดับเบิลคลิกก็ได้)', false, 'ปรับรูปในกรอบ') : ''}
+        ${btn('replace-img', 'replace', 'ใส่/แทนที่รูป (หรือลากรูปมาวางบนกรอบ)', false, ph && !ph.placeholder ? 'แทนที่รูป' : 'ใส่รูป')}
+        ${btn('ungroup', 'ungroup', 'แยกส่วนประกอบของกรอบ', false, 'แยก')}${common()}`;
     } else if (kind === 'group') {
       html = `${a.graphic && a.graphic.mono ? sw('graphic', a.graphic.color, 'สีกราฟิก') : ''}${btn('ungroup', 'ungroup', 'ยกเลิกกลุ่ม (Ctrl+Shift+G)', false, 'ยกเลิกกลุ่ม')}
         ${btn('flip:flipX', 'flipH', 'พลิกแนวนอน')}${btn('flip:flipY', 'flipV', 'พลิกแนวตั้ง')}${common()}`;
@@ -1586,7 +1817,10 @@ export class Editor {
       html = `
         ${btn('replace-img', 'replace', 'แทนที่รูป (คงขนาดและกรอบเดิม)', false, 'แทนที่รูป')}
         ${btn('pop:adjust', 'adjust', 'ปรับแต่งรูป', false, 'ปรับแต่ง')}
-        ${btn('crop-mode', 'crop', 'ครอบตัด (ลากขอบบนรูป · ดับเบิลคลิกรูปก็ได้)', false, 'ครอบตัด')}
+        ${this.isFrame(a) && !a.placeholder
+          ? `${btn('crop-mode', 'crop', 'ปรับรูปในกรอบ: ลากเลือกส่วนที่แสดง ย่อ/ขยาย (ดับเบิลคลิกรูปก็ได้)', false, 'ปรับรูปในกรอบ')}${btn('frame-detach', 'ungroup', 'เอารูปออกจากกรอบ (กรอบกลับเป็นกรอบว่าง)', false, 'เอาออกจากกรอบ')}`
+          : btn('crop-mode', 'crop', 'ครอบตัด (ลากขอบบนรูป · ดับเบิลคลิกรูปก็ได้)', false, 'ครอบตัด')}
+        ${a.mask === 'text' ? btn('frame-text-edit', 'text', 'แก้ข้อความ/ฟอนต์ของกรอบ', false, 'แก้ข้อความกรอบ') : ''}
         ${btn('pop:mask', 'border', 'รูปทรงกรอบ', false, 'กรอบ')}
         ${btn('flip:flipX', 'flipH', 'พลิกแนวนอน')}${btn('flip:flipY', 'flipV', 'พลิกแนวตั้ง')}
         ${btn('pop:effects', 'effects', 'เงา/ขอบ', false, 'เอฟเฟกต์')}
@@ -1644,6 +1878,11 @@ export class Editor {
       case 'crop-done': return this.endCrop(true);
       case 'crop-cancel': return this.endCrop(false);
       case 'crop-reset': return this.cropReset();
+      case 'crop-fit': return this.cropFit();
+      case 'frame-detach': return this.detachFromFrame(a);
+      case 'frame-text': return this.openTextFrame();
+      case 'deco-adjust': return this.startDecoCrop(a);
+      case 'frame-text-edit': return this.openTextFrame(a);
       case 'crop-pct': {
         this.endCrop(true);
         return this.openImagePopover('crop', this.$('[data-ctx] [data-act="crop-mode"]'));
@@ -2142,6 +2381,7 @@ export class Editor {
     const base = { originX: 'center', originY: 'center', left: 0, top: 0 };
     if (kind === 'circle') cp = new Circle({ ...base, radius: s / 2 });
     if (kind === 'rounded') cp = new Rect({ ...base, width: w, height: hh, rx: s * 0.12, ry: s * 0.12 });
+    if (kind === 'rr') cp = new Rect({ ...base, width: w, height: hh, rx: s * (img.maskR || 0.1), ry: s * (img.maskR || 0.1) });
     if (kind === 'star' || kind === 'hexagon') {
       const n = kind === 'star' ? 10 : 6;
       const pts = Array.from({ length: n }, (_, i) => {
@@ -2152,6 +2392,11 @@ export class Editor {
       cp = new Polygon(pts, base);
     }
     if (isFrameShape(kind)) cp = frameClipPath(kind, w, hh);
+    if (kind === 'text' && img.maskText) {
+      const m = img.maskText;
+      cp = new FabricText(m.text || 'A', { fontFamily: m.font || 'Kanit', fontWeight: m.bold === false ? 'normal' : 'bold', fontSize: 200, originX: 'center', originY: 'center', left: 0, top: 0 });
+      cp.set({ scaleX: w / cp.width, scaleY: hh / cp.height });
+    }
     if (kind === 'heart') {
       cp = new Path('M50 90 C20 70 0 52 0 30 C0 12 14 0 30 0 C40 0 47 6 50 14 C53 6 60 0 70 0 C86 0 100 12 100 30 C100 52 80 70 50 90 Z', base);
       const k = s / 100;
@@ -2249,6 +2494,9 @@ export class Editor {
         body.innerHTML = `<div class="el-view">
           <div class="el-view-head"><button class="icon-btn" data-el-view="" title="กลับ">${icon('left', 20)}</button><b>กรอบรูป</b><small class="hint">${FRAMES.length} แบบ</small></div>
           <p class="hint">คลิกเพื่อเพิ่มกรอบ แล้วลากรูป (จากแผงหรือบนหน้างาน) ไปปล่อยบนกรอบ รูปจะเข้าไปในกรอบเอง</p>
+          <button class="btn full" data-act="frame-text">🔤 พิมพ์ข้อความเป็นกรอบรูป (เลือกฟอนต์ได้ทุกแบบ)</button>
+          <div class="el-row-head"><b>กรอบตกแต่ง (โพลารอยด์ ฟิล์ม อุปกรณ์)</b><small class="hint">${DECO_FRAMES.length}</small></div>
+          <div class="el-grid frames deco">${DECO_FRAMES.map((d) => `<button class="el" data-act="deco:${d.k}" title="กรอบ${esc(d.label)}"><span class="frame-svg">${decoPreview(d.k)}</span></button>`).join('')}</div>
           ${FRAME_CATEGORIES.map(([cat, title]) => { const l = byCat(cat); return l.length ? `<div class="el-row-head"><b>${esc(title)}</b><small class="hint">${l.length}</small></div><div class="el-grid frames">${l.map(([f, i]) => this.frameTile(f, i)).join('')}</div>` : ''; }).join('')}
           <div class="el-row-head"><b>ตารางรูป (คอลลาจ)</b><small class="hint">${GRIDS.length}</small></div>
           <div class="el-grid">${GRIDS.map(([l, cells], i) => `<button class="el" data-act="grid:${i}" title="กริด ${l}"><svg viewBox="0 0 60 60" width="100%" height="100%">${cells.map(([x, y, w, hh]) => `<rect x="${x * 52 + 5}" y="${y * 52 + 5}" width="${w * 52 - 2}" height="${hh * 52 - 2}" rx="2" fill="#cfc8ec"/>`).join('')}</svg></button>`).join('')}</div>
@@ -2544,6 +2792,7 @@ export class Editor {
       case 'tpl': return this.applyTemplate(+arg);
       case 'smart': return this.addSmart(arg);
       case 'frame': return this.addFrame(+arg);
+      case 'deco': return this.addDecoFrame(arg);
       case 'grid': return this.addGrid(+arg);
       case 'shape': return this.addShape(+arg);
       case 'gfx': {
@@ -2613,6 +2862,7 @@ export class Editor {
 
   /** A picture that acts as a frame: an empty placeholder, a shaped picture, or one that was put into a frame. */
   isFrame(o) {
+    if (o && o.decoFrame) return true;
     return isImage(o) && !o.cropUI && (o.placeholder || o.mask || o.frame);
   }
 
