@@ -1628,14 +1628,14 @@ function meanDiff(a, b) {
     assert(bf.heading === 'Mitr' && bf.body === 'Niramit' && !bf.sub, `stored ${JSON.stringify(bf)}`);
     assert((await page.$eval('[data-act="brand-text:heading"]', (b) => b.style.fontFamily)).includes('Mitr'), 'preview font');
     await page.click('[data-act="brand-text:heading"]');
-    await wait(300);
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.fontFamily === 'Mitr', null, { timeout: 10000 }).catch(() => {}); // waits for the web font
     let a = await ev(() => { const o = __lai.canvas.getActiveObject(); return [o.type, o.fontFamily]; });
     assert(a[0] === 'textbox' && a[1] === 'Mitr', `brand heading ${a}`);
     await page.click('[data-act="brand-color:#123456"]');
     await wait(100);
     assert((await ev(() => __lai.canvas.getActiveObject().fill)) === '#123456', 'text colour');
     await page.click('[data-act="brand-text:body"]');
-    await wait(300);
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.fontFamily === 'Niramit', null, { timeout: 10000 }).catch(() => {});
     a = await ev(() => __lai.canvas.getActiveObject().fontFamily);
     assert(a === 'Niramit', `brand body ${a}`);
     // brand fonts on top of the font picker
@@ -1691,6 +1691,30 @@ function meanDiff(a, b) {
     assert((await page.$eval('[data-brand-font="heading"]', (s) => s.value)) === 'Mitr', 'fonts after reload');
     assert((await page.$$('[data-brand-colors] [data-act="brand-color:#123456"]')).length === 1, 'colours after reload');
     await ev(() => { localStorage.setItem('lai-brand-colors', '[]'); localStorage.setItem('lai-brand-fonts', '{}'); });
+    await clearPage();
+  });
+  await step('อัปโหลดไฟล์หลายแบบ: รูปมือถือแนวตั้ง (EXIF) ไม่ตะแคง · รูปใหญ่ถูกย่อ · PNG โปร่งใสยังโปร่งใส · ไฟล์เสีย/ไม่ใช่รูป/HEIC มีข้อความบอก', async () => {
+    const FX = path.join(__dirname, 'fixtures');
+    const up = async (files) => {
+      await ev(() => { const c = __lai.canvas; c.discardActiveObject(); c.remove(...c.getObjects()); document.querySelectorAll('.toast').forEach((t) => t.remove()); });
+      await page.setInputFiles('[data-file-upload]', files);
+      await page.waitForFunction(() => __lai.canvas.getObjects().length || document.querySelector('.toast.error'), null, { timeout: 10000 }).catch(() => {});
+      await wait(200);
+      return ev(() => { const o = __lai.canvas.getObjects()[0]; const t = document.querySelector('.toast.error')?.textContent || ''; if (!o) return { t }; const el = o.getElement(); const c = document.createElement('canvas'); c.width = c.height = 20; const x = c.getContext('2d'); x.drawImage(el, 0, 0, 20, 20); return { w: el.naturalWidth || el.width, h: el.naturalHeight || el.height, top: [...x.getImageData(10, 1, 1, 1).data], corner: [...x.getImageData(0, 0, 1, 1).data], t }; });
+    };
+    let r = await up(path.join(FX, 'phone-portrait.jpg'));
+    assert(r.w === 200 && r.h === 400 && r.top[0] > 200 && r.top[1] < 60, 'EXIF portrait ' + JSON.stringify(r));
+    r = await up(path.join(FX, 'transparent.png'));
+    assert(r.corner[3] === 0, 'transparency kept ' + JSON.stringify(r));
+    const big = await ev(() => { const c = document.createElement('canvas'); c.width = 5000; c.height = 3000; const x = c.getContext('2d'); x.fillStyle = '#3366cc'; x.fillRect(0, 0, 5000, 3000); return c.toDataURL('image/jpeg', 0.8).split(',')[1]; });
+    r = await up({ name: 'big.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(big, 'base64') });
+    assert(Math.max(r.w, r.h) === 2048, 'large picture downscaled ' + JSON.stringify(r));
+    r = await up({ name: 'broken.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('ffd8ffe0' + '00'.repeat(40), 'hex') });
+    assert(r.w === undefined && /broken\.jpg/.test(r.t), 'broken file message ' + r.t);
+    r = await up({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hi') });
+    assert(r.w === undefined && /ไม่ใช่ไฟล์รูปภาพ/.test(r.t), 'non-image message ' + r.t);
+    r = await up({ name: 'IMG_0001.HEIC', mimeType: 'image/heic', buffer: Buffer.from('000000186674797068656963', 'hex') });
+    assert(r.w === undefined && /HEIC/.test(r.t), 'HEIC message ' + r.t);
     await clearPage();
   });
 

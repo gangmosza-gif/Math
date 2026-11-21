@@ -1205,24 +1205,22 @@ export class Editor {
       this.setDropFrame(null);
       const act = e.dataTransfer?.getData('application/x-lai-act');
       if (act) return this.dropAct(act, e);
-      const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/'));
-      if (!files.length) return;
+      const all = [...(e.dataTransfer?.files || [])];
+      if (!all.length) return;
+      const files = all.filter((f) => f.type.startsWith('image/'));
       const dropPt = this.canvas.getScenePoint(e);
-      const mock = files.length === 1 ? this.mockupAt(dropPt) : null;
-      if (mock) {
-        fileToDataURL(files[0]).then(async ({ url }) => {
-          await saveUpload({ id: uid(), url, name: files[0].name, createdAt: Date.now() });
-          this.rebuildSmart(mock, { ...mock.smart, src: url });
-        });
-        return;
-      }
-      const target = files.length === 1 ? this.imageAt(dropPt) : null;
-      if (target) {
-        fileToDataURL(files[0]).then(async ({ url }) => {
-          await saveUpload({ id: uid(), url, name: files[0].name, createdAt: Date.now() });
-          this.replaceImage(target, url);
-        });
-      } else this.handleFiles(files, true);
+      // one picture dropped on a mockup / picture / frame replaces it; anything else (and every error
+      // message for non-images or unreadable files) goes through handleFiles
+      const one = all.length === 1 && files.length === 1 ? files[0] : null;
+      const mock = one ? this.mockupAt(dropPt) : null;
+      const target = one && !mock ? this.imageAt(dropPt) : null;
+      if (mock || target) {
+        fileToDataURL(one).then(async ({ url }) => {
+          await saveUpload({ id: uid(), url, name: one.name, createdAt: Date.now() });
+          if (mock) this.rebuildSmart(mock, { ...mock.smart, src: url });
+          else this.replaceImage(target, url);
+        }).catch((err) => { console.error(err); toast(`อ่านไฟล์รูปไม่สำเร็จ: “${one.name}” (ไฟล์อาจเสียหาย ลองบันทึกใหม่เป็น JPG หรือ PNG)`, 'error'); });
+      } else this.handleFiles(all, true);
     });
     ws.addEventListener('wheel', (e) => {
       if (this._crop && !(e.ctrlKey || e.metaKey)) {
@@ -1254,14 +1252,20 @@ export class Editor {
 
   async handleFiles(files, addToCanvas) {
     for (const f of files) {
-      if (!f.type.startsWith('image/')) continue;
+      const heic = /\.(heic|heif)$/i.test(f.name) || /image\/hei[cf]/.test(f.type);
+      if (!f.type.startsWith('image/') && !heic) {
+        toast(`“${f.name}” ไม่ใช่ไฟล์รูปภาพ (ใช้ได้: JPG, PNG, WEBP, GIF, SVG)`, 'error');
+        continue;
+      }
       try {
         const { url } = await fileToDataURL(f);
         await saveUpload({ id: uid(), url, name: f.name, createdAt: Date.now() });
         if (addToCanvas) await this.addImage(url, f.name.replace(/\.[^.]+$/, ''));
       } catch (err) {
         console.error(err);
-        toast('อ่านไฟล์รูปไม่สำเร็จ: ' + f.name, 'error');
+        toast(heic
+          ? `“${f.name}” เป็นไฟล์ HEIC จาก iPhone ซึ่งเบราว์เซอร์นี้เปิดไม่ได้ — ตั้งค่ากล้องเป็น “เข้ากันได้มากที่สุด” หรือบันทึกเป็น JPG/PNG ก่อน`
+          : `อ่านไฟล์รูปไม่สำเร็จ: “${f.name}” (ไฟล์อาจเสียหาย ลองเปิดแล้วบันทึกใหม่เป็น JPG หรือ PNG)`, 'error');
       }
     }
     if (this.panel === 'uploads') this.renderPanel();
