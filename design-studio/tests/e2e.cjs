@@ -2035,6 +2035,11 @@ function meanDiff(a, b) {
   // =============================================================== PAGES / VIEW
   group('11. หลายหน้า ซูม มุมมอง');
   await step('เพิ่ม ทำสำเนา เลื่อน ลบ และสลับหน้า', async () => {
+    if (ONLY) { // standalone: the page the earlier sections leave behind (a text and a shape)
+      await clearPage();
+      await ev(async () => { await __lai.addText('heading'); await __lai.addShape(0); __lai.canvas.discardActiveObject(); __lai.commit(); });
+      await wait(300);
+    }
     await page.click('[data-act="page-add"]');
     await wait(300);
     assert((await ev(() => [__lai.design.pages.length, __lai.cur])).join() === '2,1', 'add');
