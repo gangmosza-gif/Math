@@ -491,3 +491,18 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 .chip-row .chip { height: 28px; padding: 0 10px; font-size: 12px; }
 .up-del.set-bg { font-size: 13px; }
 [data-photo-tabs] { margin-bottom: 8px; }
+
+/* brand kit */
+.brand-colors { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.brand-colors .bc { position: relative; }
+.brand-colors .bc .sw { width: 100%; }
+.brand-colors .bc-del { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 12px; line-height: 1; display: none; }
+.brand-colors .bc:hover .bc-del, .brand-colors .bc:focus-within .bc-del { display: block; }
+@media (hover: none) { .brand-colors .bc-del { display: block; } }
+.brand-colors .sw.add { position: relative; display: grid; place-items: center; cursor: pointer; }
+.brand-colors .sw.add input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.brand-font-row { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+.brand-font-row select { height: 32px; min-width: 0; }
+.brand-text { margin-top: 8px; }
+.up-grid.logos img { object-fit: contain; background: repeating-conic-gradient(#0000 0 25%, #8882 0 50%) 0 0 / 12px 12px; }
+.font-item.brand small { color: var(--accent); }

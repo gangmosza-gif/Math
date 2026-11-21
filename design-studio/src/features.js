@@ -2,14 +2,14 @@
 import { FabricImage, Path, Point, ActiveSelection, Group } from 'fabric';
 import { icon } from './icons.js';
 import { esc, toast, modal, popover, closePopover } from './ui.js';
-import { FONTS, ensureFont } from './fonts.js';
+import { FONTS, ensureFont, ensureFonts } from './fonts.js';
 import {
   buildMockup, defaultMockup,
   buildIcon,
   buildTable, buildChart, buildQR, buildEquation, latexToSVG, placeholderImage,
   defaultTable, defaultChart, defaultQR, defaultEquation, FRAMES, GRIDS, CHART_COLORS, CHART_TYPES, MULTI_TYPES, seriesOf, rowsToData, parseDelimited,
 } from './smart.js';
-import { pageToDataURL, pageLinks, safeURL } from './export.js';
+import { pageToDataURL, pageLinks, safeURL, pageThumb } from './export.js';
 import { fileToDataURL } from './imageutil.js';
 import { saveUpload, uid, saveVersion, listVersions, deleteVersion } from './storage.js';
 
@@ -30,6 +30,13 @@ function brandColors() {
 }
 function setBrandColors(list) {
   try { localStorage.setItem('lai-brand-colors', JSON.stringify(list.slice(0, 24))); } catch { /* storage blocked */ }
+}
+export const BRAND_FONT_KINDS = [['heading', 'หัวข้อ'], ['sub', 'หัวข้อย่อย'], ['body', 'เนื้อความ']];
+function brandFonts() {
+  try { return JSON.parse(localStorage.getItem('lai-brand-fonts') || '{}') || {}; } catch { return {}; }
+}
+function setBrandFonts(f) {
+  try { localStorage.setItem('lai-brand-fonts', JSON.stringify(f)); } catch { /* storage blocked */ }
 }
 
 export const features = {
@@ -699,6 +706,59 @@ export const features = {
     setBrandColors(list);
   },
   clearBrandColors() { setBrandColors([]); },
+  removeBrandColor(c) { setBrandColors(brandColors().filter((x) => x !== c)); },
+  brandFonts,
+  setBrandFont(kind, font) {
+    const f = brandFonts();
+    if (font) f[kind] = font; else delete f[kind];
+    setBrandFonts(f);
+  },
+  /** Role of a text object relative to the page: heading / sub / body (size & weight based). */
+  textRole(o) {
+    const fs = (o.fontSize || 16) * Math.abs(o.scaleY || 1);
+    const U = this.U;
+    const w = o.fontWeight === 'bold' ? 700 : +o.fontWeight || 400;
+    if (fs >= U * 0.07 || (w >= 700 && fs >= U * 0.05)) return 'heading';
+    if (fs >= U * 0.045 || w >= 600) return 'sub';
+    return 'body';
+  },
+  /** Apply the brand fonts to every text on every page (headings / subheadings / body). */
+  async applyBrandFonts() {
+    const bf = brandFonts();
+    if (!Object.keys(bf).length) { toast('ยังไม่ได้ตั้งฟอนต์แบรนด์', 'error'); return 0; }
+    await Promise.race([ensureFonts(Object.values(bf)), new Promise((r) => setTimeout(r, 3000))]);
+    const isTxt = (o) => /^(textbox|i-?text|text)$/i.test(o.type || '');
+    let n = 0;
+    const fix = (o) => {
+      if (isTxt(o)) {
+        const f = bf[this.textRole(o)];
+        if (f && o.fontFamily !== f) {
+          if (o.set) o.set('fontFamily', f); else o.fontFamily = f;
+          if (o.styles) {
+            for (const line of Object.values(o.styles)) for (const ch of Object.values(line)) if (ch && ch.fontFamily) ch.fontFamily = f;
+          }
+          if (o.initDimensions) { o.initDimensions(); o.set('dirty', true); }
+          n++;
+        }
+      }
+      const kids = o.getObjects ? o.getObjects() : o.objects;
+      if (kids) kids.forEach(fix);
+      if (o.getObjects) o.set('dirty', true);
+    };
+    // current page: live objects; other pages: their stored JSON
+    this.canvas.getObjects().forEach(fix);
+    this.design.pages.forEach((pg, i) => {
+      if (i === this.cur) return;
+      const json = JSON.parse(pg.json);
+      (json.objects || []).forEach(fix);
+      pg.json = JSON.stringify(json);
+    });
+    this.canvas.requestRenderAll();
+    this.commit();
+    this.design.pages.forEach((pg, i) => { if (i !== this.cur) pageThumb(this.design, pg.json, 200).then((u) => { this.thumbs.set(pg.id, u); this.renderPages(); }).catch(() => {}); });
+    toast(n ? `เปลี่ยนฟอนต์แบรนด์แล้ว ${n} ข้อความ` : 'ข้อความทั้งหมดใช้ฟอนต์แบรนด์อยู่แล้ว');
+    return n;
+  },
 
   // ------------------------------------------------------------ drag from side panel
   bindPanelDrag() {
@@ -713,7 +773,7 @@ export const features = {
 
   markDraggable(root) {
     root.querySelectorAll('[data-act]').forEach((el) => {
-      if (/^(shape|line|sticker|text|combo|up-add|photo|pattern|smart|frame):/.test(el.dataset.act)) {
+      if (/^(shape|line|sticker|text|combo|up-add|logo-add|brand-text|photo|pattern|smart|frame):/.test(el.dataset.act)) {
         el.draggable = true;
         el.querySelectorAll('img').forEach((i) => { i.draggable = false; });
       }

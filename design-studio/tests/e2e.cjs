@@ -1041,6 +1041,106 @@ function meanDiff(a, b) {
   });
 
   // =============================================================== BACKGROUND / DRAW
+  await step('[D5] ชุดแบรนด์: สี ฟอนต์ และโลโก้ (เพิ่ม/ลบ/ใช้งาน/โหลดกลับ)', async () => {
+    await clearPage();
+    await ev(() => { localStorage.setItem('lai-brand-colors', '[]'); localStorage.setItem('lai-brand-fonts', '{}'); });
+    await panel('brand');
+    assert((await page.textContent('[data-panel-title]')).includes('แบรนด์'), 'panel title');
+    // colours: add two, delete one
+    for (const c of ['#123456', '#e63946']) {
+      await page.$eval('[data-brand-color-input]', (i, c) => { i.value = c; i.dispatchEvent(new Event('change', { bubbles: true })); }, c);
+      await wait(100);
+    }
+    const colsNow = () => page.$$eval('[data-brand-colors] [data-act^="brand-color:"]', (e) => e.map((x) => x.dataset.act.split(':')[1]));
+    let cols = await colsNow();
+    assert(cols.join() === '#e63946,#123456', `colors ${cols}`);
+    await page.hover('[data-act="brand-color:#e63946"]');
+    await page.click('[data-act="brand-color-del:#e63946"]');
+    await wait(100);
+    cols = await colsNow();
+    assert(cols.join() === '#123456', `after delete ${cols}`);
+    // colour with nothing selected → page background
+    await ev(() => __lai.canvas.discardActiveObject());
+    await page.click('[data-act="brand-color:#123456"]');
+    await wait(100);
+    assert((await ev(() => __lai.canvas.backgroundColor)) === '#123456', 'bg colour');
+    // fonts
+    await page.selectOption('[data-brand-font="heading"]', 'Mitr');
+    await wait(100);
+    await page.selectOption('[data-brand-font="body"]', 'Niramit');
+    await wait(100);
+    const bf = await ev(() => JSON.parse(localStorage.getItem('lai-brand-fonts')));
+    assert(bf.heading === 'Mitr' && bf.body === 'Niramit' && !bf.sub, `stored ${JSON.stringify(bf)}`);
+    assert((await page.$eval('[data-act="brand-text:heading"]', (b) => b.style.fontFamily)).includes('Mitr'), 'preview font');
+    await page.click('[data-act="brand-text:heading"]');
+    await wait(300);
+    let a = await ev(() => { const o = __lai.canvas.getActiveObject(); return [o.type, o.fontFamily]; });
+    assert(a[0] === 'textbox' && a[1] === 'Mitr', `brand heading ${a}`);
+    await page.click('[data-act="brand-color:#123456"]');
+    await wait(100);
+    assert((await ev(() => __lai.canvas.getActiveObject().fill)) === '#123456', 'text colour');
+    await page.click('[data-act="brand-text:body"]');
+    await wait(300);
+    a = await ev(() => __lai.canvas.getActiveObject().fontFamily);
+    assert(a === 'Niramit', `brand body ${a}`);
+    // brand fonts on top of the font picker
+    await page.click('[data-act="pop:font"]');
+    const top = await page.$$eval('.font-pop .font-item.brand', (e) => e.map((x) => x.dataset.f));
+    assert(top.join() === 'Mitr,Niramit', `font picker brand group ${top}`);
+    await page.keyboard.press('Escape');
+    // apply brand fonts to every page
+    await clearPage();
+    await ev(async () => {
+      const L = __lai;
+      await L.addText('heading'); await L.addText('body');
+      L.canvas.getObjects().forEach((o) => o.set('fontFamily', 'Sarabun'));
+      L.commit();
+    });
+    const pages0 = await ev(() => __lai.design.pages.length);
+    await ev(async () => { const L = __lai; await L.addPage(); await L.addText('heading'); await L.addText('sub'); L.commit(); await L.loadPage(0); });
+    await wait(300);
+    await page.click('[data-act="brand-apply-fonts"]');
+    await wait(600);
+    const fams = await ev(() => __lai.design.pages.map((p) => JSON.parse(p.json).objects.map((o) => o.fontFamily)));
+    assert(fams[0].join() === 'Mitr,Niramit', `page 1 ${fams[0]}`);
+    assert(fams[pages0][0] === 'Mitr' && fams[pages0][1] === 'Kanit', `page 2 (sub unset keeps its font) ${fams[pages0]}`);
+    // undo brings the old fonts back
+    await page.keyboard.press('Control+z'); await wait(400);
+    assert((await ev(() => __lai.canvas.getObjects().map((o) => o.fontFamily).join())) === 'Sarabun,Sarabun', 'undo apply');
+    // drop the extra page again
+    await ev(async (n) => { const L = __lai; L.design.pages.splice(n, 1); L.commit(); L.renderPages(); }, pages0);
+    // logos
+    await page.setInputFiles('[data-brand-logo-file]', IMG2);
+    await page.waitForSelector('.up-grid.logos [data-act^="logo-add:"]');
+    assert((await page.$$('.up-grid.logos .up')).length === 1, 'one logo');
+    const n0 = await objCount();
+    await page.click('.up-grid.logos [data-act^="logo-add:"]');
+    await wait(300);
+    assert((await objCount()) === n0 + 1 && (await ev(() => __lai.canvas.getActiveObject().name.startsWith('โลโก้'))), 'logo added');
+    // logos stay out of normal uploads
+    await panel('uploads');
+    await wait(200);
+    const logoId = await ev(() => __lai._logos[0].id);
+    const upIds = await page.$$eval('.up-grid [data-act^="up-add:"]', (e) => e.map((x) => x.dataset.act.slice(7)));
+    assert(upIds.length > 0 && !upIds.includes(logoId), `logo not in uploads ${logoId} ${upIds}`);
+    await panel('brand');
+    await wait(200);
+    assert((await page.$$('.up-grid.logos .up')).length === 1, 'logo persists');
+    await page.click('.up-grid.logos .up-del', { force: true });
+    await wait(300);
+    assert((await page.$$('.up-grid.logos .up')).length === 0, 'logo deleted');
+    // colours/fonts survive a full reload of the app
+    await ev(() => __lai.saveNow && __lai.saveNow());
+    await page.reload();
+    await page.waitForSelector('.canvas-container');
+    await wait(600);
+    await panel('brand');
+    assert((await page.$eval('[data-brand-font="heading"]', (s) => s.value)) === 'Mitr', 'fonts after reload');
+    assert((await page.$$('[data-brand-colors] [data-act="brand-color:#123456"]')).length === 1, 'colours after reload');
+    await ev(() => { localStorage.setItem('lai-brand-colors', '[]'); localStorage.setItem('lai-brand-fonts', '{}'); });
+    await clearPage();
+  });
+
   group('8. พื้นหลัง และวาดอิสระ');
   await step('พื้นหลัง: สีพื้น ไล่เฉด ตัวเลือกสี', async () => {
     await panel('background');

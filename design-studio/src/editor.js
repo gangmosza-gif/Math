@@ -14,7 +14,7 @@ import { PRESETS } from './presets.js';
 import { PATTERNS, PHOTO_LIBRARY } from './patterns.js';
 import { Vignette, warmthMatrix, tintMatrix, duotoneMatrix, sharpen } from './filters.js';
 import { fileToDataURL } from './imageutil.js';
-import { features, SMART_LABEL } from './features.js';
+import { features, SMART_LABEL, BRAND_FONT_KINDS } from './features.js';
 import { rulers } from './rulers.js';
 import { FRAMES, GRIDS, MOCKUPS, CHART_TYPES } from './smart.js';
 
@@ -132,7 +132,7 @@ export class Editor {
           <nav class="rail">
             ${[
               ['templates', 'template', 'เทมเพลต'], ['elements', 'elements', 'องค์ประกอบ'], ['text', 'text', 'ข้อความ'],
-              ['uploads', 'upload', 'อัปโหลด'], ['photos', 'photo', 'รูปภาพ'], ['background', 'background', 'พื้นหลัง'],
+              ['uploads', 'upload', 'อัปโหลด'], ['brand', 'star', 'แบรนด์'], ['photos', 'photo', 'รูปภาพ'], ['background', 'background', 'พื้นหลัง'],
               ['draw', 'draw', 'วาด'], ['layers', 'layers', 'เลเยอร์'], ['outline', 'list', 'โครงร่าง'],
             ].map(([k, ic, label]) => `<button class="rail-btn" data-panel="${k}">${icon(ic, 22)}<span>${label}</span></button>`).join('')}
           </nav>
@@ -1646,6 +1646,7 @@ export class Editor {
       <div class="font-pop">
         <input class="input full" data-q placeholder="ค้นหาแบบอักษร…" aria-label="ค้นหาแบบอักษร" />
         <div class="font-list" data-list>
+          ${(() => { const bf = [...new Set(Object.values(this.brandFonts()))]; return bf.length ? `<div class="cp-title">★ ฟอนต์แบรนด์</div>` + bf.map((f) => `<button class="font-item brand ${f === a.fontFamily ? 'on' : ''}" data-f="${esc(f)}" style="font-family:'${esc(f)}'">${esc(f)} <small>แบรนด์</small></button>`).join('') : ''; })()}
           ${groups.map((g) => `<div class="cp-title">${g === 'ไทย' ? 'รองรับภาษาไทย' : 'ภาษาอังกฤษ'}</div>` +
             FONTS.filter((f) => f[2] === g).map(([f]) => `<button class="font-item ${f === a.fontFamily ? 'on' : ''}" data-f="${esc(f)}" style="font-family:'${esc(f)}'">${esc(f)} <small>${g === 'ไทย' ? 'สวัสดี' : 'Hello'}</small></button>`).join('')).join('')}
         </div>
@@ -2032,7 +2033,7 @@ export class Editor {
   }
 
   async renderPanel() {
-    const titles = { outline: 'โครงร่างเอกสาร', templates: 'เทมเพลต', elements: 'องค์ประกอบ', text: 'ข้อความ', uploads: 'อัปโหลด', photos: 'รูปภาพฟรี', background: 'พื้นหลัง', draw: 'วาดอิสระ', layers: 'เลเยอร์' };
+    const titles = { outline: 'โครงร่างเอกสาร', templates: 'เทมเพลต', elements: 'องค์ประกอบ', text: 'ข้อความ', uploads: 'อัปโหลด', brand: 'ชุดแบรนด์ (Brand Kit)', photos: 'รูปภาพฟรี', background: 'พื้นหลัง', draw: 'วาดอิสระ', layers: 'เลเยอร์' };
     const body = this.$('[data-panel-body]');
     this.$('[data-panel-title]').textContent = titles[this.panel] || '';
     const p = this.panel;
@@ -2115,13 +2116,54 @@ export class Editor {
         </div>`;
       linkAllFonts();
     } else if (p === 'uploads') {
-      const ups = await listUploads();
+      const ups = (await listUploads()).filter((u) => !u.brand);
       if (this.panel !== 'uploads') return;
       body.innerHTML = `
         <button class="btn primary full" data-act="upload">${icon('upload', 18)} อัปโหลดรูปภาพ</button>
         <p class="hint">หรือลากไฟล์รูปมาวางบนผืนงาน / กด Ctrl+V เพื่อวางรูปจากคลิปบอร์ด รูปจะเก็บไว้ในเบราว์เซอร์นี้</p>
         <div class="up-grid">${ups.map((u) => `<div class="up"><button class="up-img" data-act="up-add:${u.id}"><img src="${u.url}" alt="" loading="lazy"></button><button class="up-del" data-act="up-del:${u.id}" title="ลบ">${icon('close', 14)}</button></div>`).join('') || '<p class="empty">ยังไม่มีรูปที่อัปโหลด</p>'}</div>`;
       this._uploads = ups;
+    } else if (p === 'brand') {
+      const logos = (await listUploads()).filter((u) => u.brand);
+      if (this.panel !== 'brand') return;
+      const cols = this.brandColors(), bf = this.brandFonts();
+      const fontOpts = (cur) => `<option value="">— ไม่กำหนด —</option>` + ['ไทย', 'อังกฤษ'].map((g) => `<optgroup label="${g === 'ไทย' ? 'รองรับภาษาไทย' : 'ภาษาอังกฤษ'}">${FONTS.filter((f) => f[2] === g).map(([f]) => `<option ${f === cur ? 'selected' : ''}>${esc(f)}</option>`).join('')}</optgroup>`).join('');
+      body.innerHTML = `
+        <p class="hint">เก็บสี ฟอนต์ และโลโก้ของแบรนด์ไว้ใช้ซ้ำได้ทุกงาน (บันทึกในเบราว์เซอร์นี้)</p>
+        <div class="sec-title">สีแบรนด์</div>
+        <div class="brand-colors" data-brand-colors>${cols.map((c) => `<div class="bc"><button class="sw" data-act="brand-color:${c}" style="background:${c}" title="${c} — คลิกเพื่อใช้กับวัตถุที่เลือก (ไม่ได้เลือก = พื้นหลัง)"></button><button class="bc-del" data-act="brand-color-del:${c}" title="ลบสี ${c}">×</button></div>`).join('')}
+          <label class="sw add" title="เพิ่มสีแบรนด์">+<input type="color" data-brand-color-input value="#7c3aed"></label></div>
+        <p class="hint">คลิกสีเพื่อใช้กับวัตถุที่เลือก ถ้าไม่ได้เลือกจะเปลี่ยนสีพื้นหลัง</p>
+        <div class="sec-title">ฟอนต์แบรนด์</div>
+        ${BRAND_FONT_KINDS.map(([k, label]) => `<label class="brand-font-row">${label}<select class="input" data-brand-font="${k}">${fontOpts(bf[k])}</select></label>`).join('')}
+        <div class="brand-text">
+          ${BRAND_FONT_KINDS.map(([k, label]) => `<button class="text-add ${k === 'heading' ? 'h1' : k === 'sub' ? 'h2' : 'body'}" data-act="brand-text:${k}" style="${bf[k] ? `font-family:'${esc(bf[k])}'` : ''}">เพิ่ม${label}</button>`).join('')}
+        </div>
+        <button class="btn sm full" data-act="brand-apply-fonts" ${Object.keys(bf).length ? '' : 'disabled'}>ใช้ฟอนต์แบรนด์กับข้อความทุกหน้า</button>
+        <div class="sec-title">โลโก้</div>
+        <button class="btn full" data-act="brand-logo-upload">${icon('upload', 18)} อัปโหลดโลโก้</button>
+        <input type="file" accept="image/*" multiple hidden data-brand-logo-file />
+        <div class="up-grid logos">${logos.map((u) => `<div class="up"><button class="up-img" data-act="logo-add:${u.id}" title="${esc(u.name || 'โลโก้')}"><img src="${u.url}" alt="${esc(u.name || 'โลโก้')}" loading="lazy"></button><button class="up-del" data-act="up-del:${u.id}" title="ลบโลโก้">${icon('close', 14)}</button></div>`).join('') || '<p class="empty">ยังไม่มีโลโก้</p>'}</div>`;
+      this._logos = logos;
+      const ci = body.querySelector('[data-brand-color-input]');
+      ci.addEventListener('change', () => { this.addBrandColor(ci.value.toLowerCase()); this.renderPanel(); });
+      body.querySelectorAll('[data-brand-font]').forEach((sel) => sel.addEventListener('change', () => {
+        this.setBrandFont(sel.dataset.brandFont, sel.value);
+        if (sel.value) ensureFont(sel.value);
+        this.renderPanel();
+      }));
+      const lf = body.querySelector('[data-brand-logo-file]');
+      lf.addEventListener('change', async () => {
+        for (const f of lf.files) {
+          if (!f.type.startsWith('image/')) continue;
+          try {
+            const { url } = await fileToDataURL(f, 1024);
+            await saveUpload({ id: uid(), url, name: f.name.replace(/\.[^.]+$/, ''), createdAt: Date.now(), brand: true });
+          } catch { toast('อ่านไฟล์โลโก้ไม่สำเร็จ: ' + f.name, 'error'); }
+        }
+        lf.value = '';
+        this.renderPanel();
+      });
     } else if (p === 'photos') {
       const tab = this._photoTab || 'photos';
       body.innerHTML = `
@@ -2313,6 +2355,18 @@ export class Editor {
       case 'upload': return this.$('[data-file-upload]').click();
       case 'up-add': { const u = (this._uploads || []).find((x) => x.id === arg); return u && this.addImage(u.url, u.name || 'รูปภาพ'); }
       case 'up-del': return deleteUpload(arg).then(() => this.renderPanel());
+      case 'logo-add': { const u = (this._logos || []).find((x) => x.id === arg); return u && this.addImage(u.url, 'โลโก้ ' + (u.name || '')); }
+      case 'brand-logo-upload': return this.$('[data-brand-logo-file]').click();
+      case 'brand-color-del': this.removeBrandColor(arg); return this.renderPanel();
+      case 'brand-color': {
+        const a = this.canvas.getActiveObject();
+        if (!a) return this.setBackground(arg);
+        if (isImage(a)) return toast('รูปภาพเปลี่ยนสีไม่ได้ เลือกข้อความหรือรูปทรง', 'error');
+        if (a.shapeText) { a.getObjects()[0].set('fill', arg); a.set('dirty', true); this.canvas.requestRenderAll(); return this.commit(); }
+        return this.setProp('fill', arg);
+      }
+      case 'brand-text': { const f = this.brandFonts()[arg]; return this.addText(arg, f ? { fontFamily: f } : undefined); }
+      case 'brand-apply-fonts': return this.applyBrandFonts();
       case 'photo': case 'bgphoto': return this.addPhoto(+arg, k === 'bgphoto');
       case 'pattern': return this.addImage(PATTERNS[+arg].url, 'ลวดลาย ' + PATTERNS[+arg].name);
       case 'bgpattern': return this.setBackgroundImage(PATTERNS[+arg].url);
