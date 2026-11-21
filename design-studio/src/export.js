@@ -180,7 +180,8 @@ export async function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
-const safeName = (n) => (n || 'design').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'design';
+/** A file name from the design name: characters file systems reject become '-', runs of '-'/spaces collapse. */
+export const safeName = (n) => (n || 'design').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').replace(/\s*-[\s-]*/g, '-').replace(/\s+/g, ' ').replace(/^[-\s.]+|[-\s.]+$/g, '').slice(0, 120) || 'design';
 
 /**
  * Export the design.

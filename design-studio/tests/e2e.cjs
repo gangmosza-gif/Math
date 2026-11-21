@@ -166,7 +166,7 @@ function meanDiff(a, b) {
     try { await fetch(URL); break; } catch { await new Promise((r) => setTimeout(r, 200)); }
   }
   const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
-  browser = await chromium.launch(proxy ? { proxy: { server: proxy, bypass: 'localhost,127.0.0.1' } } : {});
+  browser = await chromium.launch({ env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }, ...(proxy ? { proxy: { server: proxy, bypass: 'localhost,127.0.0.1' } } : {}) });
   ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true, acceptDownloads: true });
   page = await ctx.newPage();
   // our own illustration library (public/illustrations/manifest.json) – a small fake one for the tests
@@ -2432,10 +2432,38 @@ function meanDiff(a, b) {
   // =============================================================== EXPORT
   group('12. ดาวน์โหลด / ส่งออกไฟล์');
   if (!ONLY || ONLY === 12) { // section setup (skipped when another single section runs)
-    if (ONLY) await step('เตรียมส่วนนี้: เปิดตัวแก้ไข', async () => {});
+    if (ONLY) await step('เตรียมส่วนนี้: งาน 3 หน้า (ข้อความ + รูปทรง) แบบที่ส่วนก่อนหน้าทิ้งไว้', async () => {
+      await ev(async () => {
+        const L = __lai;
+        L.design.name = 'งานทดสอบระบบ';
+        for (let i = 0; i < 3; i++) {
+          if (i) await L.addPage();
+          await L.addText('heading'); L.canvas.getActiveObject().set('text', 'หน้า ' + (i + 1) + ' สวัสดี Hello');
+          await L.addShape(i);
+          L.canvas.discardActiveObject(); L.commit();
+        }
+        await L.gotoPage(0);
+      });
+      await wait(500);
+    });
     await ev(() => __lai.resizeDesign(1080, 1080, null, true));
     await wait(500);
   }
+  await step('ชื่อไฟล์ดาวน์โหลดใช้ชื่องาน (ภาษาไทยได้) และตัดอักขระต้องห้าม / : " ? *', async () => {
+    const keep = await ev(() => __lai.design.name);
+    const names = [];
+    for (const n of ['รายงานประจำปี', 'รายงาน/ปี 2569: "ทดสอบ"?']) {
+      await ev((n) => { __lai.design.name = n; }, n);
+      await page.click('[data-act="export"]');
+      await page.click('.fmt:has(input[value="png"])');
+      await page.selectOption('[data-pages-sel]', 'cur');
+      const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click('[data-go]')]);
+      names.push(dl.suggestedFilename());
+    }
+    await ev((n) => { __lai.design.name = n; }, keep);
+    assert(names[0] === 'รายงานประจำปี.png', names[0]);
+    assert(names[1] === 'รายงาน-ปี 2569-ทดสอบ.png', names[1]);
+  });
   await step('PNG หน้าเดียว 1× ขนาดถูกต้อง', async () => {
     const b = await exportAs('png', { pages: 'cur' });
     assert(isPNG(b) && pngSize(b).join() === '1080,1080', `png ${pngSize(b)}`);
