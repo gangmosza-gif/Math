@@ -1,0 +1,48 @@
+name: Check illustrations
+
+# Runs the automatic checks every time new illustration images are pushed to the inbox.
+on:
+  push:
+    paths:
+      - 'design-studio/illustrations/inbox/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: design-studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install checker tools (Pillow, numpy, Thai OCR)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q tesseract-ocr tesseract-ocr-tha
+          pip install pillow numpy
+      - name: Check every batch folder that has images
+        run: |
+          echo "# Illustration check" >> "$GITHUB_STEP_SUMMARY"
+          found=0
+          for d in illustrations/inbox/batch-*/; do
+            [ -d "$d" ] || continue
+            ls "$d" | grep -qiE '\.(png|jpe?g|webp)$' || continue
+            found=1
+            python3 tools/check_illustrations.py "$d"
+            cat "${d%/}/_check/report.md" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          done
+          [ "$found" = 1 ] || echo "No images yet." >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload reports and contact sheets
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: illustration-check
+          path: design-studio/illustrations/inbox/**/_check/
+          if-no-files-found: ignore
