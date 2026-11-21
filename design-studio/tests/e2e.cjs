@@ -2009,6 +2009,28 @@ function meanDiff(a, b) {
     await page.waitForSelector('.kbd-table');
     await page.keyboard.press('Escape');
   });
+  await step('พิมพ์ในช่องชื่องาน/ช่องรหัสสี: ปุ่ม Delete T R C Ctrl+D Ctrl+Z ไม่ไปกระทบหน้างาน · Cmd (Mac) ใช้แทน Ctrl ได้', async () => {
+    await clearPage();
+    await ev(() => __lai.addShape(0)); await wait(200);
+    await ev(() => { __lai.canvas.setActiveObject(__lai.canvas.getObjects()[0]); __lai.renderCtx(); });
+    const name0 = await page.inputValue('[data-name]');
+    await page.click('[data-name]'); await page.keyboard.press('End');
+    for (const k of ['Delete', 'Backspace', 't', 'r', 'c', 'Control+d', 'Control+a']) await page.keyboard.press(k);
+    await page.fill('[data-name]', name0); await page.keyboard.press('Enter');
+    await ev(() => { __lai.canvas.setActiveObject(__lai.canvas.getObjects()[0]); __lai.renderCtx(); });
+    await page.click('[data-ctx] [data-act="color:fill"]');
+    await page.click('.color-pop [data-hex]', { clickCount: 3 });
+    for (const k of ['Delete', 'Backspace', 'Control+z', 'Control+d']) await page.keyboard.press(k);
+    await page.keyboard.press('Escape');
+    await wait(200);
+    assert((await objCount()) === 1, 'keys typed in a field changed the page: ' + (await objCount()));
+    await ev(() => __lai.canvas.setActiveObject(__lai.canvas.getObjects()[0]));
+    await page.keyboard.press('Meta+d'); await wait(250);
+    assert((await objCount()) === 2, 'Cmd+D');
+    await page.keyboard.press('Meta+z'); await wait(250);
+    assert((await objCount()) === 1, 'Cmd+Z');
+    await clearPage();
+  });
 
   // =============================================================== PAGES / VIEW
   group('11. หลายหน้า ซูม มุมมอง');
