@@ -2010,6 +2010,7 @@ function meanDiff(a, b) {
     await page.keyboard.press('Escape');
   });
   await step('พิมพ์ในช่องชื่องาน/ช่องรหัสสี: ปุ่ม Delete T R C Ctrl+D Ctrl+Z ไม่ไปกระทบหน้างาน · Cmd (Mac) ใช้แทน Ctrl ได้', async () => {
+    const keep = await ev(() => __lai.serialize()); // the next section starts from this page
     await clearPage();
     await ev(() => __lai.addShape(0)); await wait(200);
     await ev(() => { __lai.canvas.setActiveObject(__lai.canvas.getObjects()[0]); __lai.renderCtx(); });
@@ -2029,7 +2030,7 @@ function meanDiff(a, b) {
     assert((await objCount()) === 2, 'Cmd+D');
     await page.keyboard.press('Meta+z'); await wait(250);
     assert((await objCount()) === 1, 'Cmd+Z');
-    await clearPage();
+    await ev(async (j) => { await __lai.canvas.loadFromJSON(JSON.parse(j)); __lai.canvas.requestRenderAll(); __lai.commit(); }, keep);
   });
 
   // =============================================================== PAGES / VIEW
@@ -2675,6 +2676,14 @@ function meanDiff(a, b) {
   // =============================================================== HOME MGMT
   group('13. จัดการงานในหน้าแรก');
   await step('ค้นหางาน ทำสำเนา เปลี่ยนชื่อ ลบ', async () => {
+    if (ONLY) { // standalone: the designs earlier sections leave behind (one named งานทดสอบระบบ + others)
+      await ev(async () => { __lai.design.name = 'งานทดสอบระบบ'; await __lai.addText('heading'); __lai.commit(); await __lai.saveNow(); });
+      for (const p of [1, 2]) {
+        await page.click('[data-act="home"]'); await page.waitForSelector(`.preset[data-preset="${p}"]`);
+        await page.click(`.preset[data-preset="${p}"]`); await page.waitForFunction(() => window.__lai && __lai.canvas);
+        await ev(async () => { await __lai.addShape(0); __lai.commit(); await __lai.saveNow(); });
+      }
+    }
     await page.click('[data-act="home"]');
     await page.waitForSelector('.design-card');
     const n0 = await page.$$eval('.design-card', (e) => e.length);
@@ -2753,6 +2762,27 @@ function meanDiff(a, b) {
     fs.writeFileSync(bad, '{"hello":1}');
     await page.setInputFiles('.home [data-file]', bad);
     await page.waitForSelector('.toast.error');
+  });
+  await step('เปิดงานเดียวกันสองแท็บ: แท็บที่ค้างไม่บันทึกทับงานของอีกแท็บ แต่ถามก่อน (บันทึกเป็นงานใหม่/เปิดฉบับล่าสุด/บันทึกทับ)', async () => {
+    await page.click('[data-act="home"]').catch(() => {});
+    await page.waitForSelector('.preset[data-preset="0"]');
+    await page.click('.preset[data-preset="0"]'); await page.waitForFunction(() => window.__lai && __lai.canvas);
+    await ev(async () => { __lai.design.name = 'งานสองแท็บ'; __lai.commit(); await __lai.saveNow(); });
+    const id = await ev(() => __lai.design.id);
+    const tab2 = await ctx.newPage();
+    try {
+      await tab2.goto(URL + '#/d/' + id); await tab2.waitForFunction(() => window.__lai && __lai.canvas); await tab2.waitForTimeout(400);
+      await ev(async () => { await __lai.addText('heading'); __lai.canvas.getActiveObject().set('text', 'งานจากแท็บแรก'); __lai.commit(); await __lai.saveNow(); });
+      await tab2.evaluate(async () => { await __lai.addShape(1); __lai.commit(); await __lai.saveNow(); });
+      await tab2.waitForSelector('.modal [data-c="copy"]', { timeout: 5000 });
+      await tab2.click('.modal [data-c="copy"]');
+      await tab2.waitForFunction((id) => __lai.design.id !== id && location.hash.includes(__lai.design.id), id);
+      const copy = await tab2.evaluate(() => [__lai.design.name, __lai.canvas.getObjects().map((o) => o.type).join()]);
+      assert(/สำเนา/.test(copy[0]) && copy[1].includes('rect'), 'tab 2 saved as a new design ' + copy);
+    } finally { await tab2.close(); }
+    await reloadEditor();
+    const kept = await ev(() => [__lai.design.id, __lai.canvas.getObjects().map((o) => o.text).filter(Boolean).join()]);
+    assert(kept[0] === id && kept[1].includes('งานจากแท็บแรก'), 'tab 1 work kept ' + kept);
   });
 
   // =============================================================== MOBILE & DARK

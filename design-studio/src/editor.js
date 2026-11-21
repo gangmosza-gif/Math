@@ -9,7 +9,7 @@ import { SHAPES, LINES, STICKERS, makeSticker, shapePreviewSVG } from './shapes.
 import { TEMPLATES, TEMPLATE_CATEGORIES, buildTemplate, templateFonts, pageGradient } from './templates.js';
 import { exportDesign, printDesign, pageThumb, renderPage, safeURL } from './export.js';
 export { safeURL };
-import { saveDesign, listUploads, saveUpload, deleteUpload, uid } from './storage.js';
+import { saveDesign, getDesign, listUploads, saveUpload, deleteUpload, uid } from './storage.js';
 import { PRESETS } from './presets.js';
 import { PATTERNS, PHOTO_LIBRARY } from './patterns.js';
 import { loadGraphics, loadIllustrations, setIllustrations, elementsHomeHTML, elementsViewHTML, elementsSearchHTML, searchMatch, makeElement, recolorGraphic } from './elements.js';
@@ -117,6 +117,7 @@ export class Editor {
   constructor(root, design, { onExit }) {
     this.root = root;
     this.design = design;
+    this._rev = design.rev || 0; // revision this tab started from (detects saves from another tab)
     this.onExit = onExit;
     this.cur = 0;
     this.zoom = 1;
@@ -1052,10 +1053,17 @@ export class Editor {
 
   async saveNow() {
     clearTimeout(this._saveT);
+    if (this._conflict) return; // waiting for the user to choose (see onSaveConflict)
     this.design.updatedAt = Date.now();
     const first = this.thumbs.get(this.design.pages[0].id);
     if (first) this.design.thumb = first;
     try {
+      // another tab/window saved this design since we opened it: never overwrite its work silently
+      const stored = await getDesign(this.design.id).catch(() => null);
+      if (stored && (stored.rev || 0) > this._rev && !this._forceSave) return this.onSaveConflict(stored);
+      this._forceSave = false;
+      this.design.rev = Math.max(this._rev, stored?.rev || 0) + 1;
+      this._rev = this.design.rev;
       await saveDesign(JSON.parse(JSON.stringify(this.design)));
       this.updateStatus('saved');
       if (this.hIndex > 0) this.maybeAutoVersion().catch(() => {});
@@ -1063,6 +1071,40 @@ export class Editor {
       console.error(e);
       this.updateStatus('error');
     }
+  }
+
+  /** The design was changed and saved in another tab: let the user decide instead of losing one side. */
+  onSaveConflict(stored) {
+    this._conflict = true;
+    this.updateStatus('error');
+    const m = modal({
+      title: 'งานนี้ถูกแก้ไขจากแท็บหรือหน้าต่างอื่น',
+      body: `<p>มีการบันทึกงาน “${esc(stored.name)}” จากที่อื่นหลังจากที่คุณเปิดไว้ในแท็บนี้ ถ้าบันทึกต่อ งานที่แก้ในอีกแท็บจะหายไป</p>
+        <div class="modal-actions col">
+          <button class="btn primary" data-c="copy">บันทึกงานของฉันเป็นงานใหม่ (ไม่ทับของเดิม)</button>
+          <button class="btn" data-c="reload">เปิดฉบับล่าสุด (ทิ้งการแก้ไขในแท็บนี้)</button>
+          <button class="btn danger" data-c="overwrite">บันทึกทับฉบับล่าสุด</button>
+        </div>`,
+    });
+    m.el.addEventListener('click', async (e) => {
+      const c = e.target.closest('[data-c]')?.dataset.c;
+      if (!c) return;
+      m.close();
+      this._conflict = false;
+      if (c === 'reload') return location.reload();
+      if (c === 'copy') {
+        this.design.id = uid();
+        this.design.name = `${this.design.name} (สำเนา)`;
+        this._rev = 0;
+        this.design.rev = 0;
+        this.$('[data-name]').value = this.design.name;
+        history.replaceState(null, '', `#/d/${this.design.id}`);
+        await this.saveNow();
+        return toast('บันทึกเป็นงานใหม่แล้ว งานในอีกแท็บยังอยู่ครบ', 'ok');
+      }
+      this._forceSave = true;
+      await this.saveNow();
+    });
   }
 
   updateStatus(s) {
