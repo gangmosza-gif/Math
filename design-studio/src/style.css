@@ -669,3 +669,13 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 :root[data-theme="dark"] .smart-btn.prev .thumb { background: #f7f6fb; }
 .color-pop [data-hex].bad { border-color: #e5484d; box-shadow: 0 0 0 2px rgba(229,72,77,.2); }
 .empty-search { padding: 18px 8px; text-align: center; } .empty-search b { display: block; margin-bottom: 6px; }
+/* phone: while drawing the panel is a short bar (one row of colours) so the page stays visible */
+@media (max-width: 760px) {
+  .panel.draw-compact { height: auto; max-height: 34vh; }
+  .panel.draw-compact .panel-head { padding-top: 6px; }
+  .panel.draw-compact .panel-body { padding-top: 2px; padding-bottom: 10px; }
+  .panel.draw-compact .sec-title, .panel.draw-compact .hint { display: none; }
+  .panel.draw-compact .swatches.big { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 6px; padding: 6px 0; }
+  .panel.draw-compact .swatches.big .sw { flex: 0 0 34px; width: 34px; height: 34px; }
+  .panel.draw-compact .seg button { padding: 6px; }
+}

@@ -1749,6 +1749,25 @@ function meanDiff(a, b) {
     await page.click('[data-act="draw-stop"]');
     assert(await ev(() => !__lai.canvas.isDrawingMode), 'still drawing');
   });
+  await step('วาดบนมือถือ: แผงวาดย่อเป็นแถบเล็ก หน้างานไม่ถูกบัง และลากนิ้ววาดได้จริง', async () => {
+    const pctx = await browser.newContext({ ...devices['iPhone 13'] });
+    const mp = await pctx.newPage();
+    try {
+      await mp.goto(URL); await mp.waitForSelector('.preset[data-preset="0"]');
+      await mp.click('.preset[data-preset="0"]'); await mp.waitForFunction(() => window.__lai && __lai.canvas); await mp.waitForTimeout(500);
+      await mp.evaluate(() => { __lai.openPanel('draw'); __lai.setDrawing(true); });
+      await mp.waitForTimeout(300);
+      const g = await mp.evaluate(() => { const r = __lai.canvas.upperCanvasEl.getBoundingClientRect(); const p = document.querySelector('[data-panel-box]').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, panelTop: p.top, vh: innerHeight }; });
+      assert(g.panelTop >= g.y + g.h * 0.85, `draw panel covers the page (panel top ${Math.round(g.panelTop)}, page ${Math.round(g.y)}–${Math.round(g.y + g.h)})`);
+      const cdp = await pctx.newCDPSession(mp);
+      const tp = (x, y) => [{ x, y }];
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: tp(g.x + g.w * 0.3, g.y + g.h * 0.6) });
+      for (let i = 1; i <= 10; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: tp(g.x + g.w * (0.3 + i * 0.04), g.y + g.h * 0.6 + i * 3) });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await mp.waitForTimeout(300);
+      assert((await mp.evaluate(() => __lai.canvas.getObjects().filter((o) => o.type === 'path').length)) === 1, 'touch stroke');
+    } finally { await pctx.close(); }
+  });
 
   // =============================================================== ARRANGE
   group('9. จัดวาง เลเยอร์ กลุ่ม');
@@ -2385,8 +2404,11 @@ function meanDiff(a, b) {
 
   // =============================================================== EXPORT
   group('12. ดาวน์โหลด / ส่งออกไฟล์');
-  await ev(() => __lai.resizeDesign(1080, 1080, null, true));
-  await wait(500);
+  if (!ONLY || ONLY === 12) { // section setup (skipped when another single section runs)
+    if (ONLY) await step('เตรียมส่วนนี้: เปิดตัวแก้ไข', async () => {});
+    await ev(() => __lai.resizeDesign(1080, 1080, null, true));
+    await wait(500);
+  }
   await step('PNG หน้าเดียว 1× ขนาดถูกต้อง', async () => {
     const b = await exportAs('png', { pages: 'cur' });
     assert(isPNG(b) && pngSize(b).join() === '1080,1080', `png ${pngSize(b)}`);

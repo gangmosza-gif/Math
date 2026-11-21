@@ -1148,7 +1148,8 @@ export class Editor {
   fitZoom() {
     const ws = this.$('[data-ws]');
     const pad = window.innerWidth < 760 ? 24 : 72;
-    const z = Math.min((ws.clientWidth - pad) / this.W, (ws.clientHeight - pad) / this.H);
+    const reserved = parseFloat(ws.style.paddingBottom) || 0; // room kept free for the phone drawing bar
+    const z = Math.min((ws.clientWidth - pad) / this.W, (ws.clientHeight - reserved - pad) / this.H);
     this.setZoom(z > 0 ? z : 0.3);
   }
 
@@ -2480,14 +2481,25 @@ export class Editor {
     if (!name) {
       box.classList.add('hidden');
       this.panelHidden = true;
-      requestAnimationFrame(() => this.fitZoomIfNeeded());
+      requestAnimationFrame(() => (this.syncDrawRoom() ? this.fitZoom() : this.fitZoomIfNeeded()));
       return;
     }
     this.panel = name;
     box.classList.remove('hidden');
     this.renderPanel();
     if (name === 'draw') this.setDrawing(true);
-    requestAnimationFrame(() => this.fitZoomIfNeeded());
+    requestAnimationFrame(() => (this.syncDrawRoom() ? this.fitZoom() : this.fitZoomIfNeeded()));
+  }
+
+  /** Phone + drawing: keep the page above the drawing bar (the bar floats over the workspace there).
+   * Returns true when the reserved room changed (the page must be re-fitted). */
+  syncDrawRoom() {
+    const ws = this.$('[data-ws]'), box = this.$('[data-panel-box]');
+    const want = window.innerWidth < 760 && this.panel === 'draw' && !box.classList.contains('hidden') ? Math.max(0, ws.getBoundingClientRect().bottom - box.getBoundingClientRect().top) : 0;
+    const cur = parseFloat(ws.style.paddingBottom) || 0;
+    if (Math.abs(want - cur) < 1) return false;
+    ws.style.paddingBottom = want ? want + 'px' : '';
+    return true;
   }
 
   fitZoomIfNeeded() {
@@ -2500,6 +2512,8 @@ export class Editor {
     const body = this.$('[data-panel-body]');
     this.$('[data-panel-title]').textContent = titles[this.panel] || '';
     const p = this.panel;
+    // drawing on a phone: a compact bar so the page stays visible (and drawable) above it
+    this.$('[data-panel-box]')?.classList.toggle('draw-compact', p === 'draw');
     if (p === 'outline') {
       this.renderOutline(body);
     } else if (p === 'templates') {
