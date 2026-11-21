@@ -21,6 +21,7 @@ import { rulers } from './rulers.js';
 import { FRAMES, GRIDS, MOCKUPS, CHART_TYPES, placeholderImage } from './smart.js';
 import { FRAME_SHAPES, FRAME_CATEGORIES, isFrameShape, frameClipPath, framePreview } from './frames.js';
 import { DECO_FRAMES, decoFrame, decoPreview } from './decoframes.js';
+import { fillThumbs } from './thumbs.js';
 
 const CHART_ICON = { bar: '📊', 'bar-group': '📊', 'bar-stack': '▥', 'bar-stack100': '▥', hbar: '☰', 'hbar-group': '☰', 'hbar-stack': '☰', waterfall: '⛲', lollipop: '🍭',
   line: '📈', 'line-multi': '📈', 'line-smooth': '〰', step: '⌐', area: '◭', 'area-stack': '◭', pie: '◔', donut: '◎', halfdonut: '◠', polar: '✿', radial: '◉',
@@ -2518,16 +2519,17 @@ export class Editor {
         <div class="sec-title">ตาราง QR สมการ</div>
         <div class="smart-grid">
           ${[['table', '▦', 'ตาราง'], ['qr', '▣', 'QR Code'], ['equation', '∑', 'สมการ']]
-            .map(([k, ic, l]) => `<button class="smart-btn" data-act="smart:${k}" title="${l}"><b>${ic}</b><span>${l}</span></button>`).join('')}
+            .map(([k, ic, l]) => `<button class="smart-btn prev" data-act="smart:${k}" title="${l}">${k === 'equation' ? `<b class="thumb eq"><svg viewBox="0 0 120 60" width="88%"><g font-family="Times New Roman, serif" font-style="italic" fill="#1f2333"><text x="6" y="36" font-size="17">x =</text><text x="40" y="25" font-size="14">−b ± √<tspan text-decoration="overline">b²−4ac</tspan></text><line x1="38" y1="31" x2="116" y2="31" stroke="#1f2333" stroke-width="1.4"/><text x="68" y="49" font-size="14">2a</text></g></svg></b>` : `<b class="thumb" data-thumb="${k}">${ic}</b>`}<span>${l}</span></button>`).join('')}
         </div>
-        <div class="sec-title">กราฟ (${CHART_TYPES.length} แบบ)</div>
+        <div class="sec-title">กราฟ (${CHART_TYPES.length} แบบ) <small class="hint">ภาพคือหน้าตาจริงที่จะได้ · ดับเบิลคลิกกราฟเพื่อแก้ข้อมูล</small></div>
+        <div class="chart-sections">${[...new Set(CHART_TYPES.map((t) => t[2]))].map((g) => `<div class="chart-group">${esc(g)}</div>
         <div class="smart-grid charts">
-          ${CHART_TYPES.map(([k, l, g]) => `<button class="smart-btn" data-act="smart:${k}" title="กราฟ ${l} ${g}"><b>${CHART_ICON[k] || '📊'}</b><span>${l}</span></button>`).join('')}
-        </div>
+          ${CHART_TYPES.filter((t) => t[2] === g).map(([k, l]) => `<button class="smart-btn prev" data-act="smart:${k}" title="กราฟ ${l}"><b class="thumb" data-thumb="${k}">${CHART_ICON[k] || '📊'}</b><span>${l}</span></button>`).join('')}
+        </div>`).join('')}</div>
         <div class="sec-title">ไอคอน</div>
         <div class="el-grid icons">${LIBRARY_ICONS.map(([n, l]) => `<button class="el" data-act="smart:icon-${n}" title="ไอคอน ${l}">${icon(n, 26)}</button>`).join('')}</div>
         <div class="sec-title">ม็อกอัป (ใส่รูปในอุปกรณ์)</div>
-        <div class="smart-grid">${MOCKUPS.map(([k, ic, l]) => `<button class="smart-btn" data-act="smart:mockup-${k}" title="ม็อกอัป ${l}"><b>${ic}</b><span>${l}</span></button>`).join('')}</div>
+        <div class="smart-grid">${MOCKUPS.map(([k, ic, l]) => `<button class="smart-btn prev" data-act="smart:mockup-${k}" title="ม็อกอัป ${l}"><b class="thumb" data-thumb="mockup-${k}">${ic}</b><span>${l}</span></button>`).join('')}</div>
         <div class="sec-title">กรอบรูป</div>
         <div class="el-grid" data-frame-grid>${FRAMES.slice(0, 16).map((f, i) => this.frameTile(f, i)).join('')}</div>
         <button class="btn sm full" data-el-view="frames">ดูกรอบรูปทั้งหมด ${FRAMES.length} แบบ (ตัวอักษร ตัวเลข พยัญชนะไทย ขอบฉีก …)</button>
@@ -2548,7 +2550,7 @@ export class Editor {
         body.querySelector('[data-el-home]').hidden = !!v;
         this.markDraggable(body);
         body.querySelectorAll('.el, .smart-btn').forEach((b) => { b.hidden = !!v && !(b.title || '').toLowerCase().includes(v); });
-        body.querySelectorAll('.sec-title').forEach((t) => { const g = t.nextElementSibling; t.hidden = g && [...g.children].every((c) => c.hidden); });
+        body.querySelectorAll('.sec-title, .chart-group').forEach((t) => { const g = t.nextElementSibling; const items = g ? [...g.querySelectorAll('.el, .smart-btn')] : []; t.hidden = items.length > 0 && items.every((c) => c.hidden); });
       };
       q.addEventListener('input', runSearch);
       if (q.value) runSearch();
@@ -2696,6 +2698,7 @@ export class Editor {
       }).join('')}</div>` : '<p class="empty">หน้านี้ยังว่างอยู่ ลองเพิ่มข้อความหรือรูปทรงดูสิ</p>';
     }
     this.markDraggable(body);
+    if (p === 'elements') fillThumbs(body);
   }
 
   /** Thumbnails are rendered lazily, only for templates scrolled into view. */

@@ -1342,6 +1342,26 @@ function meanDiff(a, b) {
     }, b64);
     await page.waitForFunction((n0) => __lai.canvas.getObjects().length === n0 + 1, n0);
   });
+  await step('ภาพตัวอย่างจริงในแผงองค์ประกอบ: กราฟ 32 แบบ (จัดเป็นหมวด) ตาราง QR ม็อกอัป แสดงหน้าตาที่จะได้ และค้นหาแล้วหัวข้อหมวดซ่อนตาม', async () => {
+    await clearPage();
+    await panel('elements');
+    await ev(() => { __lai._elView = ''; __lai.renderPanel(); });
+    await page.waitForFunction(() => { const t = [...document.querySelectorAll('[data-thumb]')]; return t.length >= 39 && t.every((e) => e.classList.contains('ready')); }, null, { timeout: 60000 });
+    const info = await page.$$eval('[data-thumb] img', (imgs) => imgs.map((i) => [i.naturalWidth, i.naturalHeight, i.src.startsWith('data:image/png')]));
+    assert(info.length >= 39 && info.every(([w, h, png]) => png && w > 60 && h > 20), 'real previews ' + info.length);
+    const groups = await page.$$eval('.chart-group', (e) => e.map((x) => x.textContent));
+    assert(groups.length === 5 && groups.includes('วงกลม'), 'chart groups ' + groups);
+    // a tile adds exactly the chart it shows
+    await page.click('[data-act="smart:donut"]');
+    await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.chart === 'donut');
+    await page.fill('[data-el-search]', 'โดนัท');
+    await wait(300);
+    const vis = await page.$$eval('.chart-group', (e) => e.filter((x) => !x.hidden).map((x) => x.textContent));
+    assert(vis.join() === 'วงกลม', 'only the matching group heading ' + vis);
+    await page.fill('[data-el-search]', '');
+    await wait(200);
+    await clearPage();
+  });
   await step('[A4] ม็อกอัป 6 แบบ: เพิ่ม เปลี่ยนรูป (ปุ่ม/ลากวาง) เปลี่ยนอุปกรณ์ และบันทึก-โหลดได้', async () => {
     await clearPage();
     await panel('elements');
