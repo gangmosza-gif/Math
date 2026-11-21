@@ -222,8 +222,8 @@ export class Editor {
     const c = this.canvas;
     const sel = () => { this.renderCtx(); if (this.panel === 'layers') this.renderPanel(); };
     c.on('selection:created', () => { closePopover(); if (this._style) this.maybePasteStyle(); sel(); });
-    c.on('selection:updated', () => { closePopover(); if (this._style) this.maybePasteStyle(); sel(); });
-    c.on('selection:cleared', () => { if (currentPopoverId() !== 'color-bg') closePopover(); sel(); });
+    c.on('selection:updated', () => { if (this.cropLeft()) return; closePopover(); if (this._style) this.maybePasteStyle(); sel(); });
+    c.on('selection:cleared', () => { if (this.cropLeft()) return; if (currentPopoverId() !== 'color-bg') closePopover(); sel(); });
     c.on('object:modified', (e) => {
       const t = e.target;
       if (isText(t) && (t.scaleX !== 1 || t.scaleY !== 1)) this.normalizeTextScale(t);
@@ -231,7 +231,8 @@ export class Editor {
       this.snapTargets = null;
       this.commit();
     });
-    c.on('object:moving', (e) => this.snap(e.target, e.e));
+    c.on('object:moving', (e) => { if (e.target.cropUI) return this.clampCrop(e.target, 'move'); this.snap(e.target, e.e); });
+    c.on('object:scaling', (e) => { if (e.target.cropUI) this.clampCrop(e.target, 'scale'); });
     c.on('object:rotating', (e) => {
       const t = e.target;
       const ang = ((t.angle % 360) + 360) % 360;
@@ -261,12 +262,173 @@ export class Editor {
     });
     c.on('mouse:dblclick', (e) => {
       const t = e.target;
+      if (t && t.cropUI) return this.endCrop(true);
       if (!t || t.locked) return;
       if (t.smart) this.openSmartEditor(t);
       else if (t.shapeText || this.canHoldText(t)) this.editShapeText(t);
       else if (isImage(t) && t.placeholder) this.pickReplaceImage();
-      else if (isImage(t)) this.openImagePopover('crop');
+      else if (isImage(t)) this.startCrop(t);
     });
+  }
+
+  // ---------------------------------------------------------------- drag-to-crop on canvas
+  /** Enter crop mode: show the whole picture dimmed + a draggable crop frame. */
+  startCrop(img) {
+    if (!img || !isImage(img) || img.locked || img.placeholder) return;
+    if (this._crop) return;
+    const ang = ((img.angle % 360) + 360) % 360;
+    if (img.group || ang > 0.01 || img.flipX || img.flipY || img.skewX || img.skewY) {
+      toast('รูปที่หมุน/พลิกอยู่ ใช้การครอบตัดแบบสไลเดอร์แทน');
+      return this.openImagePopover('crop', this.$('[data-ctx] [data-act="crop-mode"]'));
+    }
+    closePopover();
+    const c = this.canvas;
+    const sx = img.scaleX, sy = img.scaleY;
+    const tl = util.transformPoint(new Point(-img.width / 2, -img.height / 2), img.calcTransformMatrix());
+    const { width: nw, height: nh } = img.getOriginalSize();
+    const saved = { cropX: img.cropX || 0, cropY: img.cropY || 0, width: img.width, height: img.height, left: img.left, top: img.top, crop: img.crop ? { ...img.crop } : undefined, evented: img.evented, selectable: img.selectable };
+    const ui = { excludeFromExport: true, cropUI: true, originX: 'left', originY: 'top', hasRotatingPoint: false, lockRotation: true, objectCaching: false };
+    const ghost = new FabricImage(img.getElement(), {
+      ...ui, left: tl.x - saved.cropX * sx, top: tl.y - saved.cropY * sy, scaleX: sx, scaleY: sy,
+      opacity: 0.4, hasControls: false, lockScalingX: true, lockScalingY: true, hoverCursor: 'move',
+      borderColor: 'rgba(124,58,237,.6)', borderDashArray: [6, 4],
+    });
+    const frame = new Rect({
+      ...ui, left: tl.x, top: tl.y, width: img.width * sx, height: img.height * sy,
+      fill: 'rgba(0,0,0,0)', stroke: null, strokeWidth: 0, lockUniScaling: false,
+      borderColor: '#7c3aed', cornerColor: '#ffffff', cornerStrokeColor: '#7c3aed', cornerStyle: 'rect',
+      transparentCorners: false, cornerSize: 14, borderScaleFactor: 2, uniformScaling: false,
+    });
+    frame.setControlsVisibility({ mtr: false });
+    ghost.ghost = true; frame.frame = true;
+    img.set({ evented: false, selectable: false });
+    c.discardActiveObject();
+    this._crop = { img, ghost, frame, saved, sx, sy, nw, nh, ratio: 0 };
+    c.insertAt(c.getObjects().indexOf(img), ghost);
+    c.add(frame);
+    c.setActiveObject(frame);
+    c.requestRenderAll();
+    this.renderCtx();
+  }
+
+  /** Keep the frame inside the picture (and the picture behind the frame). */
+  clampCrop(t, mode = 'move') {
+    const k = this._crop;
+    if (!k) return;
+    const { ghost: g, frame: f } = k;
+    const gw = g.width * g.scaleX, gh = g.height * g.scaleY;
+    if (t === g) {
+      const fw = f.width * f.scaleX, fh = f.height * f.scaleY;
+      g.set({ left: Math.min(f.left, Math.max(f.left + fw - gw, g.left)), top: Math.min(f.top, Math.max(f.top + fh - gh, g.top)) });
+    } else {
+      const min = 8;
+      let x1 = f.left, y1 = f.top, x2 = f.left + f.width * f.scaleX, y2 = f.top + f.height * f.scaleY;
+      const w = x2 - x1, h = y2 - y1;
+      if (mode === 'move') {
+        x1 = Math.max(g.left, Math.min(x1, g.left + gw - w)); y1 = Math.max(g.top, Math.min(y1, g.top + gh - h));
+        x2 = x1 + w; y2 = y1 + h;
+      } else {
+        x1 = Math.max(x1, g.left); y1 = Math.max(y1, g.top);
+        x2 = Math.min(x2, g.left + gw); y2 = Math.min(y2, g.top + gh);
+        if (k.ratio && f.uniformScaling) {
+          // keep the chosen ratio when an edge hits the picture border
+          const r = k.ratio;
+          if ((x2 - x1) / (y2 - y1) > r) { const nw = (y2 - y1) * r; if (x1 === f.left) x2 = x1 + nw; else x1 = x2 - nw; }
+          else { const nh = (x2 - x1) / r; if (y1 === f.top) y2 = y1 + nh; else y1 = y2 - nh; }
+        }
+        if (x2 - x1 < 8) x2 = x1 + 8;
+        if (y2 - y1 < 8) y2 = y1 + 8;
+      }
+      f.set({ left: x1, top: y1, scaleX: (x2 - x1) / f.width, scaleY: (y2 - y1) / f.height });
+    }
+    f.setCoords(); g.setCoords();
+    this.syncCrop();
+  }
+
+  /** Copy the frame/ghost geometry into the real image's crop. */
+  syncCrop() {
+    const { img, ghost: g, frame: f, sx, sy, nw, nh } = this._crop;
+    const fw = f.width * f.scaleX, fh = f.height * f.scaleY;
+    const cropX = Math.max(0, (f.left - g.left) / sx), cropY = Math.max(0, (f.top - g.top) / sy);
+    const width = Math.min(nw - cropX, fw / sx), height = Math.min(nh - cropY, fh / sy);
+    img.set({ cropX, cropY, width, height });
+    img.setPositionByOrigin(new Point(f.left + fw / 2, f.top + fh / 2), 'center', 'center');
+    const pc = (v) => Math.round(v * 1000) / 10;
+    img.crop = { l: pc(cropX / nw), t: pc(cropY / nh), r: pc((nw - cropX - width) / nw), b: pc((nh - cropY - height) / nh) };
+    this.applyMask(img, img.mask);
+    img.setCoords();
+    img.set('dirty', true);
+    this.canvas.requestRenderAll();
+  }
+
+  /** Fixed-ratio frame centred on the current frame, as large as fits. */
+  cropRatio(ratio) {
+    const k = this._crop;
+    if (!k) return;
+    k.ratio = ratio;
+    const { ghost: g, frame: f } = k;
+    const sides = (v) => f.setControlsVisibility({ ml: v, mr: v, mt: v, mb: v });
+    if (!ratio) { f.uniformScaling = false; sides(true); this.canvas.setActiveObject(f); return this.canvas.requestRenderAll(); }
+    sides(false);
+    const gw = g.width * g.scaleX, gh = g.height * g.scaleY;
+    let w = gw, h = gw / ratio;
+    if (h > gh) { h = gh; w = gh * ratio; }
+    const fw = f.width * f.scaleX, fh = f.height * f.scaleY;
+    const cx = Math.max(g.left + w / 2, Math.min(g.left + gw - w / 2, f.left + fw / 2));
+    const cy = Math.max(g.top + h / 2, Math.min(g.top + gh - h / 2, f.top + fh / 2));
+    f.set({ left: cx - w / 2, top: cy - h / 2, width: w, height: h, scaleX: 1, scaleY: 1 });
+    f.uniformScaling = true;
+    f.setCoords();
+    this.canvas.setActiveObject(f);
+    this.syncCrop();
+  }
+
+  cropReset() {
+    const k = this._crop;
+    if (!k) return;
+    const { ghost: g, frame: f } = k;
+    f.set({ left: g.left, top: g.top, width: g.width * g.scaleX, height: g.height * g.scaleY, scaleX: 1, scaleY: 1 });
+    f.uniformScaling = false;
+    f.setControlsVisibility({ ml: true, mr: true, mt: true, mb: true });
+    k.ratio = 0;
+    f.setCoords();
+    this.canvas.setActiveObject(f);
+    this.syncCrop();
+  }
+
+  /** Selection moved away from the crop UI → apply (like Canva). Returns true when handled. */
+  cropLeft() {
+    const k = this._crop;
+    if (!k || k.ending) return false;
+    const a = this.canvas.getActiveObject();
+    if (a === k.frame || a === k.ghost) { this.renderCtx(); return true; }
+    this.endCrop(true, a);
+    return true;
+  }
+
+  endCrop(apply = true, nextActive) {
+    const k = this._crop;
+    if (!k) return;
+    k.ending = true;
+    const c = this.canvas;
+    const { img, ghost, frame, saved } = k;
+    if (apply) this.syncCrop();
+    else {
+      img.set({ cropX: saved.cropX, cropY: saved.cropY, width: saved.width, height: saved.height, left: saved.left, top: saved.top });
+      img.crop = saved.crop;
+      this.applyMask(img, img.mask);
+      img.set('dirty', true);
+    }
+    img.set({ evented: saved.evented, selectable: saved.selectable });
+    img.setCoords();
+    c.remove(ghost, frame);
+    this._crop = null;
+    c.discardActiveObject();
+    c.setActiveObject(nextActive && nextActive.canvas ? nextActive : img);
+    c.requestRenderAll();
+    if (apply) this.commit();
+    this.renderCtx();
+    if (this.panel === 'layers') this.renderPanel();
   }
 
   normalizeTextScale(t) {
@@ -341,6 +503,7 @@ export class Editor {
   }
 
   async loadPage(i, { fit = false } = {}) {
+    if (this._crop) this.endCrop(true);
     this.cur = Math.max(0, Math.min(i, this.design.pages.length - 1));
     const json = JSON.parse(this.design.pages[this.cur].json);
     const fontList = fontsInJSON(json);
@@ -380,7 +543,7 @@ export class Editor {
 
   /** Persist current page into the design + history. `soft` = coalesce typing. */
   commit(soft = false) {
-    if (this.loading) return;
+    if (this.loading || this._crop) return;
     if (!soft && (this._hasToc || this.canvas.getObjects().some((o) => o.autoPage || o.autoToc))) {
       this.design.pages[this.cur].json = this.serialize();
       this.syncPageNumbers();
@@ -439,6 +602,7 @@ export class Editor {
   }
 
   undo() {
+    if (this._crop) return this.endCrop(false);
     if (this.canvas.getActiveObject()?.isEditing) return;
     clearTimeout(this._softT);
     if (this.history[this.hIndex] && !samePages(this.design.pages, this.history[this.hIndex].pages)) this.pushHistory();
@@ -448,6 +612,7 @@ export class Editor {
   }
 
   redo() {
+    if (this._crop) return;
     if (this.hIndex >= this.history.length - 1) return;
     this.hIndex++;
     this.restore(this.history[this.hIndex]);
@@ -714,6 +879,13 @@ export class Editor {
       if (a && a.isEditing) return;
       const mod = e.ctrlKey || e.metaKey;
       const k = e.key.toLowerCase();
+      if (this._crop) {
+        if (k === 'enter') { e.preventDefault(); this.endCrop(true); }
+        else if (k === 'escape') { e.preventDefault(); this.endCrop(false); }
+        else if (mod && k === 'z') { e.preventDefault(); this.endCrop(false); }
+        else if (k === 'delete' || k === 'backspace' || mod) e.preventDefault();
+        return;
+      }
       if (mod && k === 'z') { e.preventDefault(); return e.shiftKey ? this.redo() : this.undo(); }
       if (mod && k === 'y') { e.preventDefault(); return this.redo(); }
       if (mod && k === 'f') { e.preventDefault(); return this.openFindReplace(); }
@@ -1166,6 +1338,20 @@ export class Editor {
       ${btn('lock', a && a.locked ? 'lock' : 'unlock', a && a.locked ? 'ปลดล็อก' : 'ล็อก')}
       ${btn('delete', 'trash', 'ลบ (Delete)')}`;
     let html = '';
+    if (this._crop) {
+      bar.innerHTML = `<span class="ctx-label">✂ ลากขอบกรอบเพื่อครอบตัด · ลากรูปจางเพื่อเลื่อนตำแหน่งรูป</span>
+        ${btn('crop-ratio:0', 'crop', 'อิสระ', false, 'อิสระ')}
+        <button class="tool" data-act="crop-ratio:1" title="จัตุรัส"><span>1:1</span></button>
+        <button class="tool" data-act="crop-ratio:1.7778" title="16:9"><span>16:9</span></button>
+        <button class="tool" data-act="crop-ratio:0.8" title="4:5"><span>4:5</span></button>
+        <button class="tool" data-act="crop-reset" title="กลับเป็นรูปเต็ม"><span>รีเซ็ต</span></button>
+        <button class="tool" data-act="crop-pct" title="ปรับเป็นเปอร์เซ็นต์ด้วยสไลเดอร์"><span>%</span></button>
+        <span class="grow"></span>
+        <button class="tool" data-act="crop-cancel" title="ยกเลิก (Esc)"><span>ยกเลิก</span></button>
+        <button class="btn primary sm" data-act="crop-done" title="เสร็จสิ้น (Enter)">เสร็จสิ้น</button>`;
+      bar.dataset.kind = 'crop';
+      return;
+    }
     if (kind === 'page') {
       const bg = this.canvas.backgroundImage ? 'transparent' : this.canvas.backgroundColor;
       html = `${sw('bg', bg, 'สีพื้นหลัง')}<span class="ctx-label">สีพื้นหลัง</span>
@@ -1226,7 +1412,7 @@ export class Editor {
       html = `
         ${btn('replace-img', 'replace', 'แทนที่รูป (คงขนาดและกรอบเดิม)', false, 'แทนที่รูป')}
         ${btn('pop:adjust', 'adjust', 'ปรับแต่งรูป', false, 'ปรับแต่ง')}
-        ${btn('pop:crop', 'crop', 'ครอบตัด', false, 'ครอบตัด')}
+        ${btn('crop-mode', 'crop', 'ครอบตัด (ลากขอบบนรูป · ดับเบิลคลิกรูปก็ได้)', false, 'ครอบตัด')}
         ${btn('pop:mask', 'border', 'รูปทรงกรอบ', false, 'กรอบ')}
         ${btn('flip:flipX', 'flipH', 'พลิกแนวนอน')}${btn('flip:flipY', 'flipV', 'พลิกแนวตั้ง')}
         ${btn('pop:effects', 'effects', 'เงา/ขอบ', false, 'เอฟเฟกต์')}
@@ -1280,6 +1466,15 @@ export class Editor {
       case 'color': return this.openColorPopover(btn, arg);
       case 'pop': return this.openPop(arg, btn);
       case 'duplicate': return this.duplicate();
+      case 'crop-mode': return this.startCrop(a);
+      case 'crop-done': return this.endCrop(true);
+      case 'crop-cancel': return this.endCrop(false);
+      case 'crop-reset': return this.cropReset();
+      case 'crop-pct': {
+        this.endCrop(true);
+        return this.openImagePopover('crop', this.$('[data-ctx] [data-act="crop-mode"]'));
+      }
+      case 'crop-ratio': return this.cropRatio(+arg);
       case 'smart-edit': return this.openSmartEditor();
       case 'shape-text-edit': return this.editShapeText(this.canvas.getActiveObject());
       case 'replace-img': return this.pickReplaceImage();
@@ -1983,7 +2178,7 @@ export class Editor {
       const r = body.querySelector('[data-draw-width]');
       r.addEventListener('input', () => { d.width = +r.value; r.nextElementSibling.textContent = r.value; this.setDrawing(true); });
     } else if (p === 'layers') {
-      const objs = this.canvas.getObjects().slice().reverse();
+      const objs = this.canvas.getObjects().filter((o) => !o.cropUI).slice().reverse();
       const active = new Set(this.canvas.getActiveObjects());
       const all = this.canvas.getObjects();
       body.innerHTML = objs.length ? `<p class="hint">บนสุดอยู่ด้านบนของรายการ</p><div class="layers">${objs.map((o) => {

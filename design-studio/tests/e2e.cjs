@@ -773,7 +773,8 @@ function meanDiff(a, b) {
     await page.keyboard.press('Escape');
   });
   await step('ครอบตัด: สไลเดอร์และอัตราส่วน 1:1 / 16:9 / รีเซ็ต', async () => {
-    await page.click('[data-act="pop:crop"]');
+    await page.click('[data-act="crop-mode"]');
+    await page.click('[data-act="crop-pct"]');
     await page.click('[data-ratio="1"]');
     let o = await ev(() => { const i = __lai.canvas.getObjects()[0]; return [Math.round(i.width), Math.round(i.height)]; });
     assert(o[0] === o[1], `1:1 ${o}`);
@@ -785,6 +786,93 @@ function meanDiff(a, b) {
     o = await ev(() => { const i = __lai.canvas.getObjects()[0]; return [i.width, i.height, i.cropX]; });
     assert(o[0] === 400 && o[1] === 300 && o[2] === 0, `reset ${o}`);
     await page.keyboard.press('Escape');
+  });
+  await step('ครอบตัดโดยลากขอบบนรูปโดยตรง (ลากมุม/ขอบ, ลากรูปใต้กรอบ, Esc ยกเลิก, Enter ใช้)', async () => {
+    // the top picture (two identical uploads overlap exactly, so the top one receives the clicks)
+    const IDX = await ev(() => __lai.canvas.getObjects().map((o) => o.type).lastIndexOf('image'));
+    const st = () => ev((ix) => { const i = __lai.canvas.getObjects().filter((o) => !o.cropUI)[ix]; return { cx: Math.round(i.cropX || 0), cy: Math.round(i.cropY || 0), w: Math.round(i.width), h: Math.round(i.height), crop: i.crop, n: __lai.canvas.getObjects().length, ui: __lai.canvas.getObjects().filter((o) => o.cropUI).length, crop_on: !!__lai._crop, left: Math.round(i.getBoundingRect().left), top: Math.round(i.getBoundingRect().top) }; }, IDX);
+    const ctl = (name, who = 'frame') => ev(([name, who]) => { const k = __lai._crop; const o = k[who]; o.setCoords(); const r = __lai.canvas.upperCanvasEl.getBoundingClientRect(); const p = o.oCoords[name]; return { x: r.left + p.x, y: r.top + p.y }; }, [name, who]);
+    const drag = async (a, dx, dy) => { await page.mouse.move(a.x, a.y); await page.mouse.down(); for (let s = 1; s <= 6; s++) await page.mouse.move(a.x + (dx * s) / 6, a.y + (dy * s) / 6); await page.mouse.up(); await wait(80); };
+    const s0 = await st();
+    assert(s0.w === 400 && s0.h === 300 && s0.cx === 0, `start ${JSON.stringify(s0)}`);
+    await selectIndex(IDX);
+    const p = await screenPoint(IDX);
+    await page.mouse.dblclick(p.x, p.y);
+    await wait(150);
+    let s1 = await st();
+    assert(s1.crop_on && s1.ui === 2 && (await ev((ix) => __lai._crop.img === __lai.canvas.getObjects().filter((o) => !o.cropUI)[ix], IDX)), `crop mode on ${JSON.stringify(s1)}`);
+    assert(await page.$('[data-ctx] [data-act="crop-done"]'), 'done button');
+    // drag right edge inward
+    const mr = await ctl('mr');
+    await drag(mr, -60, 0);
+    s1 = await st();
+    assert(s1.w < 400 && s1.w > 200 && s1.cx === 0 && s1.h === 300, `right edge ${JSON.stringify(s1)} at ${JSON.stringify(mr)} ${await ev(() => JSON.stringify([__lai.canvas.upperCanvasEl.getBoundingClientRect(), __lai.canvas.viewportTransform, innerWidth, innerHeight, document.elementFromPoint(0,0)?.className]))}`);
+    // drag top-left corner inward
+    await drag(await ctl('tl'), 30, 25);
+    const s2 = await st();
+    assert(s2.cx > 0 && s2.cy > 0 && s2.w < s1.w && s2.h < 300, `corner ${JSON.stringify(s2)}`);
+    assert(s2.crop.l > 0 && s2.crop.t > 0 && s2.crop.r > 0, `crop % ${JSON.stringify(s2.crop)}`);
+    // try to drag the frame far outside → clamped to the picture
+    const fc = await ev(() => { const f = __lai._crop.frame; const r = __lai.canvas.upperCanvasEl.getBoundingClientRect(); const c = f.getCenterPoint(); const v = __lai.canvas.viewportTransform; return { x: r.left + c.x * v[0] + v[4], y: r.top + c.y * v[3] + v[5] }; });
+    await drag(fc, 900, 900);
+    const s3 = await st();
+    assert(s3.cx + s3.w <= 400 && s3.cy + s3.h <= 300 && s3.w === s2.w && s3.h === s2.h, `clamped ${JSON.stringify(s3)}`);
+    assert(s3.cx + s3.w >= 399 && s3.cy + s3.h >= 299, `at corner ${JSON.stringify(s3)}`);
+    // drag the dimmed picture: crop window moves inside the image, frame stays
+    const before = await ev(() => { const f = __lai._crop.frame; return [Math.round(f.left), Math.round(f.top)]; });
+    const g = await ev(() => { const g = __lai._crop.ghost; g.setCoords(); const r = __lai.canvas.upperCanvasEl.getBoundingClientRect(); const p = g.oCoords.tl; return { x: r.left + p.x + 6, y: r.top + p.y + 6 }; });
+    await drag(g, 40, 30);
+    const s4 = await st();
+    const after = await ev(() => { const f = __lai._crop.frame; return [Math.round(f.left), Math.round(f.top)]; });
+    assert(after.join() === before.join(), `frame stays ${before} ${after}`);
+    assert(s4.cx < s3.cx && s4.cy < s3.cy && s4.w === s3.w, `pan ${JSON.stringify(s4)}`);
+    // Esc → cancel, original restored, UI removed, nothing in history
+    await page.keyboard.press('Escape');
+    await wait(100);
+    const s5 = await st();
+    assert(!s5.crop_on && s5.ui === 0 && s5.w === 400 && s5.h === 300 && s5.cx === 0 && s5.n === s0.n, `cancel ${JSON.stringify(s5)}`);
+    // ratio 1:1 then Enter → applied & committed
+    await page.click('[data-act="crop-mode"]');
+    await page.click('[data-act="crop-ratio:1"]');
+    let s6 = await st();
+    assert(s6.w === s6.h && s6.w === 300 && s6.cx === 50, `1:1 ${JSON.stringify(s6)}`);
+    await drag(await ctl('br'), -50, -10);
+    s6 = await st();
+    assert(Math.abs(s6.w - s6.h) <= 1 && s6.w < 300, `ratio kept ${JSON.stringify(s6)}`);
+    await page.keyboard.press('Enter');
+    await wait(100);
+    const s7 = await st();
+    assert(!s7.crop_on && s7.ui === 0 && s7.w === s6.w && s7.cx === s6.cx, `apply ${JSON.stringify(s7)}`);
+    const saved = await ev(() => JSON.parse(__lai.design.pages[__lai.cur].json).objects);
+    assert(!saved.some((o) => o.cropUI) && saved.length === s0.n, 'no crop UI saved');
+    const si = saved[IDX];
+    assert(Math.round(si.width) === s7.w && Math.round(si.cropX) === s7.cx, `saved ${si.width} ${si.cropX}`);
+    assert((await active()).type === 'image', 'image selected after apply');
+    // undo → back to full picture, redo → crop again
+    await page.keyboard.press('Control+z'); await wait(300);
+    assert((await st()).w === 400, 'undo');
+    await page.keyboard.press('Control+y'); await wait(300);
+    assert((await st()).w === s7.w, 'redo');
+    // click on empty area while cropping applies (like Canva)
+    await selectIndex(IDX);
+    await page.click('[data-act="crop-mode"]');
+    await page.click('[data-act="crop-reset"]');
+    await drag(await ctl('ml'), 40, 0);
+    const s8 = await st();
+    const cv = await ev(() => { const r = __lai.canvas.upperCanvasEl.getBoundingClientRect(); return { x: r.right - 8, y: r.bottom - 8 }; });
+    await page.mouse.click(cv.x, cv.y);
+    await wait(120);
+    const s9 = await st();
+    assert(!s9.crop_on && s9.ui === 0 && s9.cx === s8.cx && s9.cx > 0, `click outside ${JSON.stringify(s9)}`);
+    // rotated pictures fall back to sliders
+    await selectIndex(IDX);
+    await ev(() => { const i = __lai.canvas.getActiveObject(); i.rotate(20); });
+    await page.click('[data-act="crop-mode"]');
+    await wait(100);
+    assert(!(await ev(() => !!__lai._crop)) && await page.$('.popover [data-k="l"]'), 'rotated → slider popover');
+    await page.keyboard.press('Escape');
+    await ev(() => { const i = __lai.canvas.getActiveObject(); i.rotate(0); i.set({ cropX: 0, cropY: 0, width: 400, height: 300 }); i.crop = null; i.setCoords(); __lai.commit(); });
+    await selectIndex(0);
   });
   await step('กรอบรูปทรง 6 แบบ + เส้นขอบรูป', async () => {
     for (const m of ['circle', 'rounded', 'star', 'heart', 'hexagon', 'none']) {
