@@ -2597,7 +2597,7 @@ export class Editor {
       body.innerHTML = `<p class="hint">คลิกเทมเพลตเพื่อใช้กับหน้านี้ (ถ้าหน้ามีของอยู่แล้วจะเพิ่มเป็นหน้าใหม่) ทุกเทมเพลตปรับตามขนาดงานอัตโนมัติ</p>
         <input class="input full search" data-tpl-search placeholder="ค้นหาเทมเพลต เช่น ใบงาน, เมนู, ไทม์ไลน์ (${TEMPLATES.length} แบบ)" aria-label="ค้นหาเทมเพลต" />
         <div class="chip-row" data-tpl-cats>${TEMPLATE_CATEGORIES.map((c, i) => `<button class="chip ${i === 0 ? 'on' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>
-        <div class="tpl-grid">${TEMPLATES.map((t, i) => `<button class="tpl" data-act="tpl:${i}" data-cat="${esc(t.cat || '')}" title="${esc(t.name)} · ${esc(t.cat || '')}"><div class="tpl-img" data-tpl-img="${i}" style="aspect-ratio:${this.W}/${this.H}"></div><span>${esc(t.name)}</span></button>`).join('')}</div>
+        <div class="tpl-grid">${TEMPLATES.map((t, i) => [t, i]).sort((a, b) => !!b[0].page - !!a[0].page).map(([t, i]) => `<button class="tpl" data-act="tpl:${i}" data-cat="${esc(t.cat || '')}" title="${esc(t.name)} · ${esc(t.cat || '')}"><div class="tpl-img" data-tpl-img="${i}" style="aspect-ratio:${this.W}/${this.H}"></div><span>${esc(t.name)}</span></button>`).join('')}</div>
         <p class="empty" data-tpl-empty hidden>ไม่พบเทมเพลตที่ค้นหา</p>`;
       let cat = 'ทั้งหมด';
       const filter = () => {

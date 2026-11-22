@@ -369,6 +369,28 @@ function meanDiff(a, b) {
     }, FONTS);
     assert(!bad.length, bad.slice(0, 6).join(' | '));
   });
+  await step('หมวด "พรีเซนต์มืออาชีพ": 3 สไลด์ (การเงิน / ผลิตภัณฑ์ / การตลาด) อยู่หน้าสุด มีภาพตัวอย่าง และข้อความแก้ไขได้', async () => {
+    const first = await page.$$eval('.tpl', (e) => e.slice(0, 3).map((x) => x.dataset.cat));
+    assert(first.every((c) => c === 'พรีเซนต์มืออาชีพ'), 'pro first ' + first);
+    await page.click('[data-tpl-cats] [data-cat="พรีเซนต์มืออาชีพ"]');
+    const vis = await page.$$eval('.tpl', (e) => e.filter((x) => !x.hidden).map((x) => x.title));
+    assert(vis.length === 3, 'pro ' + vis);
+    await page.waitForFunction(() => [...document.querySelectorAll('.tpl:not([hidden]) [data-tpl-img]')].every((e) => e.dataset.ready), null, { timeout: 30000 });
+    const r = await ev(async (act) => {
+      const L = __lai, keep = L.design.pages.map((p) => ({ ...p })), cur = L.cur;
+      L.design.pages = [{ id: 't', json: JSON.stringify({ objects: [], background: '#fff' }) }];
+      await L.loadPage(0);
+      await L.applyTemplate(+act.split(':')[1]);
+      const objs = L.canvas.getObjects();
+      const texts = objs.filter((o) => o.type === 'textbox').map((o) => o.text);
+      const out = { n: objs.length, texts, charts: objs.filter((o) => o.smart?.type === 'chart').length, editable: objs.every((o) => o.selectable !== false) };
+      L.design.pages = keep; await L.loadPage(cur, { fit: true });
+      return out;
+    }, await page.getAttribute('.tpl:not([hidden]) >> nth=0', 'data-act'));
+    assert(r.n > 30 && r.texts.includes('฿128.4M') && r.charts === 1 && r.editable, JSON.stringify(r).slice(0, 200));
+    await page.click('[data-tpl-cats] [data-cat="ทั้งหมด"]');
+    return `${r.n} ชิ้น, ข้อความ ${r.texts.length}`;
+  });
   await step('ลบหน้าที่เกินจนเหลือ 1 หน้า', async () => {
     for (let i = 0; i < 13; i++) { await page.click('[data-act="page-del"]'); await wait(120); }
     assert((await ev(() => __lai.design.pages.length)) === 1, 'pages not deleted');

@@ -3,6 +3,10 @@
 import { Rect, Circle, Textbox, Polygon, Line, Gradient } from 'fabric';
 
 import { GENERATED_TEMPLATES } from './templates2.js';
+// pro presentation slides built with the app's own tools (tools/build_pro_templates.cjs)
+import PRO_TEMPLATES from './protemplates.json';
+
+export const PRO_CATEGORY = 'พรีเซนต์มืออาชีพ';
 
 export const TEMPLATES = [
   {
@@ -148,9 +152,10 @@ export const TEMPLATES = [
     ],
   },
   ...GENERATED_TEMPLATES,
+  ...PRO_TEMPLATES.map((t) => ({ ...t, cat: PRO_CATEGORY, items: [] })),
 ];
 
-export const TEMPLATE_CATEGORIES = ['ทั้งหมด', ...new Set(TEMPLATES.map((t) => t.cat))];
+export const TEMPLATE_CATEGORIES = ['ทั้งหมด', PRO_CATEGORY, ...new Set(TEMPLATES.map((t) => t.cat).filter((c) => c !== PRO_CATEGORY))];
 
 function fillOf(v, angle = 135) {
   if (!Array.isArray(v)) return v;
@@ -176,6 +181,7 @@ export function pageGradient(a, b, W, H) {
 
 /** Build the fabric objects of a template for a W×H page. */
 export function buildTemplate(tpl, W, H) {
+  if (tpl.page) return buildPageTemplate(tpl, W, H);
   const u = Math.min(W, H);
   const objs = [];
   for (const it of tpl.items) {
@@ -245,7 +251,34 @@ export function buildTemplate(tpl, W, H) {
   return { objects: objs, background: bg };
 }
 
+/**
+ * A template stored as a finished page (designed at tpl.w×tpl.h): scaled uniformly to fit the
+ * W×H page and centred. Objects come back as plain JSON wrapped in { toObject } like fabric objects.
+ */
+function buildPageTemplate(tpl, W, H) {
+  const s = Math.min(W / tpl.w, H / tpl.h);
+  const dx = (W - tpl.w * s) / 2, dy = (H - tpl.h * s) / 2;
+  const objects = tpl.page.objects.map((o) => {
+    const c = structuredClone(o);
+    c.left = (o.left || 0) * s + dx;
+    c.top = (o.top || 0) * s + dy;
+    c.scaleX = (o.scaleX ?? 1) * s;
+    c.scaleY = (o.scaleY ?? 1) * s;
+    return { toObject: () => structuredClone(c) };
+  });
+  return { objects, background: structuredClone(tpl.page.background) };
+}
+
+function pageFonts(objs, out = new Set()) {
+  for (const o of objs || []) {
+    if (o.fontFamily) out.add(o.fontFamily);
+    pageFonts(o.objects, out);
+  }
+  return out;
+}
+
 export function templateFonts(tpl) {
+  if (tpl.page) return [...pageFonts(tpl.page.objects)].filter((f) => f !== 'sans-serif');
   return [...new Set(tpl.items.filter((i) => i.font && i.font !== 'sans-serif').map((i) => i.font))];
 }
 

@@ -94,10 +94,12 @@ const norm = (s) => String(s).normalize('NFC').replace(/[\s​ ]+/g, '');
 const decodeXml = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d)).replace(/&amp;/g, '&');
 
 // ---------------------------------------------------------------- sample designs (built in the app)
+const PRO = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'src', 'protemplates.json'), 'utf8'));
 const SAMPLES = [
   { key: 'mixed', preset: 0, title: 'ทุกองค์ประกอบ (IG 1080×1080)', build: 'mixed' },
   { key: 'a4', preset: 6, title: 'เอกสาร A4: ใบงาน + ประกาศ + เกียรติบัตร', build: ['tpl:2', 'tpl:6', 'tpl:3'] },
   { key: 'charts', preset: 5, title: 'กราฟหลายชุดข้อมูล 16:9 (แท่งกลุ่ม แท่งซ้อน แท่งซ้อน 100% แนวนอน เส้น เส้นโค้ง พื้นที่ซ้อน เรดาร์)', build: 'charts' },
+  { key: 'pro', preset: 5, title: 'พรีเซนต์มืออาชีพ 16:9: การเงินผู้บริหาร + เปิดตัวผลิตภัณฑ์ + ผลแคมเปญการตลาด', build: ['tpl:pro-finance', 'tpl:pro-product', 'tpl:pro-marketing'] },
   { key: 'slides', preset: 5, title: 'สไลด์ 16:9: หน้าแรก + เชิญร่วมงาน + โปรโมชัน + เมนู', build: ['tpl:7', 'tpl:5', 'tpl:0', 'tpl:9'] },
 ];
 
@@ -203,7 +205,14 @@ const SAMPLES = [
     } else {
       for (let i = 0; i < S.build.length; i++) {
         if (i > 0) { await page.click('[data-act="page-add"]'); await page.waitForTimeout(300); }
-        await ev(async (k) => { await __lai.applyTemplate(+k.split(':')[1]); }, S.build[i]);
+        // 'tpl:<number>' or 'tpl:<id of a pro template>' (found by its name in the templates panel)
+        let k = S.build[i].split(':')[1];
+        if (!/^\d+$/.test(k)) {
+          const name = PRO.find((t) => t.id === k).name;
+          if (!(await page.$('[data-tpl-cats]'))) await page.click('.rail-btn[data-panel="templates"]');
+          k = (await page.getAttribute(`.tpl[title^="${name} ·"]`, 'data-act')).split(':')[1];
+        }
+        await ev(async (k) => { await __lai.applyTemplate(k); }, +k);
         await page.waitForTimeout(400);
       }
     }

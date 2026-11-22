@@ -44,7 +44,7 @@ const fromPreset = (i, then) => { const p = PRESETS[i]; return createAndOpen({ w
 // ---------------------------------------------------------------- home: start points, shortcuts, templates
 const CATS = [
   { k: 'social', label: 'โซเชียลมีเดีย', color: '#ef4f5a', ic: 'heart', sizes: [0, 1, 2, 3, 4], tcats: ['โซเชียล', 'โปรโมชัน', 'คำคม'] },
-  { k: 'present', label: 'งานนำเสนอ', color: '#f2762e', ic: 'chart', sizes: [5, 7], tcats: ['นำเสนอ', 'อินโฟกราฟิก'] },
+  { k: 'present', label: 'งานนำเสนอ', color: '#f2762e', ic: 'chart', sizes: [5, 7], tcats: ['พรีเซนต์มืออาชีพ', 'นำเสนอ', 'อินโฟกราฟิก'] },
   { k: 'print', label: 'งานพิมพ์', color: '#8b3cf7', ic: 'print', sizes: [10, 6, 7, 11, 9], tcats: ['ประกาศ', 'กิจกรรม', 'ร้านอาหาร'] },
   { k: 'open', label: 'เปิดไฟล์', color: '#e9e7f3', ic: 'cloud', light: true },
   { k: 'doc', label: 'เอกสาร / รายงาน', color: '#3a9fb0', ic: 'file', sizes: [6, 7, 8], tcats: ['การศึกษา', 'ประกาศ', 'อินโฟกราฟิก'] },
@@ -62,12 +62,13 @@ const SHORTCUTS = [
   { label: 'สมการ', ic: 'bulb', g: ['#f0abfc', '#c026d3'], go: () => fromPreset(6, { act: 'smart:equation' }) },
   { label: 'ชุดแบรนด์', ic: 'star', g: ['#fdba74', '#ea580c'], go: () => fromPreset(0, { panel: 'brand' }) },
 ];
-const PICKS = [0, 3, 2, 9, 4, 6, 37, 17, 1, 5, 82, 67];
+const PRO_PICKS = TEMPLATES.map((t, i) => (t.page ? i : -1)).filter((i) => i >= 0);
+const PICKS = [...PRO_PICKS, 0, 3, 2, 9, 4, 6, 37, 17, 1, 5, 82, 67];
 const CAT_TINT = ['#efe7ff', '#ffe8dc', '#dff3ef', '#ffe3ef', '#e3edff', '#fff4d6', '#e8f6e0', '#f3e8ff', '#ffe9e9', '#e1f4fb', '#f1f1f1'];
 
 /** Size a template is shown and created in: slides 16:9, school/notice/infographic A4, others square. */
 function tplPreset(t) {
-  if (t.cat === 'นำเสนอ') return 5;
+  if (t.cat === 'นำเสนอ' || t.page) return 5;
   if (['การศึกษา', 'ประกาศ', 'อินโฟกราฟิก'].includes(t.cat)) return 6;
   return 0;
 }
