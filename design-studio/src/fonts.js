@@ -1,4 +1,5 @@
 import { cache } from 'fabric';
+import INLINE from 'virtual:inline-fonts'; // single-file build: every font packed into the page (else null)
 
 // [family, google css spec, group]
 // spec: 'i' = italic+bold axes, 'b' = 400/700, '' = single weight
@@ -42,12 +43,19 @@ export const FONT_NAMES = FONTS.map((f) => f[0]);
 
 /** Fonts ship with the app (public/fonts, fetched by tools/fetch_fonts.py): no internet needed. */
 export const fontSlug = (family) => family.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const blobs = {};
+/** Stylesheet URL of a bundled font (a fonts/ file, or the packed copy in the single-file build). */
 export function fontCssUrl(family) {
-  return new URL(`fonts/${fontSlug(family)}.css`, document.baseURI).href;
+  return cssUrlForSlug(fontSlug(family));
+}
+export function cssUrlForSlug(slug) {
+  if (INLINE && INLINE[slug]) return (blobs[slug] ||= URL.createObjectURL(new Blob([INLINE[slug]], { type: 'text/css' })));
+  return new URL(`fonts/${slug}.css`, document.baseURI).href;
 }
 
 /** The font's @font-face rules with every file inlined as a data URL (for files that leave the app, e.g. SVG). */
 export async function fontFaceInline(family) {
+  if (INLINE && INLINE[fontSlug(family)]) return INLINE[fontSlug(family)];
   const url = fontCssUrl(family);
   const css = await (await fetch(url)).text();
   const files = [...new Set([...css.matchAll(/url\(([^)]+)\)/g)].map((m) => m[1]))];
