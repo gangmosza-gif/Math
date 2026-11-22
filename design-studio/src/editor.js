@@ -2770,7 +2770,7 @@ export class Editor {
         <div class="seg sm" data-photo-tabs><button class="${tab === 'photos' ? 'on' : ''}" data-tab="photos">รูปถ่าย (${lib.items.length})</button><button class="${tab === 'patterns' ? 'on' : ''}" data-tab="patterns">ลวดลาย (${PATTERNS.length})</button></div>
         ${tab === 'photos' ? (lib.items.length ? `
           <input class="input full search" data-photo-q placeholder="ค้นหารูป เช่น cat, temple, ภูเขา" value="${esc(this._photoQ || '')}" aria-label="ค้นหารูปถ่าย">
-          <div class="chips" data-photo-cats><button class="chip ${cat ? '' : 'on'}" data-cat="">ทั้งหมด</button>${lib.categories.map((c) => `<button class="chip ${cat === c.key ? 'on' : ''}" data-cat="${c.key}">${esc(c.th)}</button>`).join('')}</div>
+          <div class="chips" data-photo-cats><button class="chip ${cat ? '' : 'on'}" data-cat="">ทั้งหมด</button>${lib.categories.filter((c) => lib.items.some((it) => it.cat === c.key)).map((c) => `<button class="chip ${cat === c.key ? 'on' : ''}" data-cat="${c.key}">${esc(c.th)}</button>`).join('')}</div>
           <div class="photo-grid" data-photo-grid></div><button class="btn full" data-more-photos>แสดงเพิ่ม</button>
           <p class="hint">รูปถ่ายในโปรแกรม (CC0 จาก Wikimedia Commons ใช้ได้ทุกงาน ไม่ต้องต่ออินเทอร์เน็ต) · กดค้าง/ชี้ที่รูปเพื่อดูชื่อและผู้ถ่าย</p>`
           : `<p class="empty">ยังไม่มีคลังรูปถ่ายในโปรแกรม ใช้ “อัปโหลด” เพื่อใส่รูปของคุณเอง</p>`)

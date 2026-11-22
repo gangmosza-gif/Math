@@ -1582,19 +1582,23 @@ function meanDiff(a, b) {
     await panel('photos');
     await page.waitForSelector('[data-tab="photos"]');
     const total = +(await page.textContent('[data-tab="photos"]')).match(/\((\d+)\)/)[1];
-    assert(total >= 300, 'photos ' + total);
-    assert((await page.$$('[data-photo-cats] [data-cat]')).length >= 10, 'categories');
+    // works with any size of library (it grows with tools/fetch_photos.py)
+    const lib = await ev(async () => (await (await fetch('photos/manifest.json')).json()));
+    assert(total >= 1 && total === lib.items.length, 'photos ' + total);
+    const cats = await page.$$eval('[data-photo-cats] [data-cat]', (e) => e.map((x) => x.dataset.cat));
+    assert(cats.length === 1 + new Set(lib.items.map((x) => x.cat)).size, 'only categories that have photos ' + cats);
     const n1 = await page.$$eval('[data-act^="photo:"]', (e) => e.length);
-    await page.click('[data-more-photos]');
-    const n2 = await page.$$eval('[data-act^="photo:"]', (e) => e.length);
-    assert(n1 === 60 && n2 > n1, `${n1} -> ${n2}`);
+    assert(n1 === Math.min(60, total), 'first page ' + n1);
+    if (total > 60) { await page.click('[data-more-photos]'); assert((await page.$$eval('[data-act^="photo:"]', (e) => e.length)) > n1, 'more'); }
     await page.waitForFunction(() => [...document.querySelectorAll('[data-photo-grid] img')].slice(0, 6).every((i) => i.complete && i.naturalWidth > 0), null, { timeout: 15000 });
-    await page.click('[data-photo-cats] [data-cat="thailand"]');
-    await page.waitForSelector('[data-photo-cats] [data-cat="thailand"].on');
-    const th = await page.$$eval('[data-act^="photo:"]', (e) => e.length);
-    assert(th >= 10 && th < n2, 'category filter ' + th);
+    const firstCat = cats[1];
+    await page.click(`[data-photo-cats] [data-cat="${firstCat}"]`);
+    await page.waitForSelector(`[data-photo-cats] [data-cat="${firstCat}"].on`);
+    const inCat = await page.$$eval('[data-act^="photo:"]', (e) => e.length);
+    assert(inCat === Math.min(60, lib.items.filter((x) => x.cat === firstCat).length), 'category filter ' + inCat);
     await page.click('[data-photo-cats] [data-cat=""]');
-    await page.fill('[data-photo-q]', 'cat'); await page.dispatchEvent('[data-photo-q]', 'change');
+    const word = lib.items[0].title.split(/\s+/)[0];
+    await page.fill('[data-photo-q]', word); await page.dispatchEvent('[data-photo-q]', 'change');
     await page.waitForFunction(() => document.querySelectorAll('[data-act^="photo:"]').length > 0);
     const c1 = await objCount();
     await page.click('[data-act^="photo:"] >> nth=0');
@@ -2911,7 +2915,7 @@ function meanDiff(a, b) {
     // reload with the font stylesheet delayed by 4 s
     const cdp = await c2.newCDPSession(p2);
     await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
-    await p2.route(/family=Taviraj/, async (route) => { await new Promise((r) => setTimeout(r, 4000)); route.continue().catch(() => {}); });
+    await p2.route(/fonts\/taviraj/, async (route) => { await new Promise((r) => setTimeout(r, 4000)); route.continue().catch(() => {}); });
     await p2.reload();
     await p2.waitForFunction(() => window.__lai && __lai.canvas.getObjects().length === 1, null, { timeout: 15000 });
     const before = await p2.evaluate(() => { window.__t0 = __lai.canvas.getObjects()[0]; return { h: __lai.history.length, fontOk: [...document.fonts].some((f) => f.family.includes('Taviraj') && f.status === 'loaded') }; });
