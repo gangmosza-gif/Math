@@ -186,6 +186,10 @@ function meanDiff(a, b) {
   page.on('pageerror', (e) => { pageErrors.push(e.message); if (process.env.DBG) console.log('PAGEERROR', section, (e.stack || '').split('\n').slice(0, 5).join(' | ')); });
   if (process.env.DBG) page.on('console', (m) => { if (m.text().startsWith('DBG')) console.log('      ', m.text().slice(0, 300)); });
   page.on('dialog', (d) => d.dismiss());
+  // 100% local: record every request that leaves the app (checked at the end)
+  const external = new Set();
+  ctx.on('request', (r) => { const u = r.url(); if (!/^(data|blob):/.test(u) && !/^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(u)) external.add(u.slice(0, 120)); });
+  globalThis.__external = external;
 
   // =============================================================== HOME
   group('1. หน้าแรก (Home)');
@@ -1574,14 +1578,35 @@ function meanDiff(a, b) {
     assert(isPNG(png), 'export');
     await clearPage();
   });
-  await step('[D1] คลังรูปถ่าย ~990 รูป (แสดงทีละ 60 + แสดงเพิ่ม) และคลังลวดลาย 72 แบบ ใช้เป็นรูป/พื้นหลังได้', async () => {
+  await step('คลังรูปถ่ายของโปรแกรมเอง (CC0 ไม่ต้องต่อเน็ต): หมวด ค้นหา แสดงเพิ่ม ใส่รูป ตั้งเป็นพื้นหลัง และคลังลวดลาย 72 แบบ', async () => {
     await panel('photos');
-    const total = await page.textContent('[data-tab="photos"]');
-    assert(/\((9\d\d)\)/.test(total), total);
+    await page.waitForSelector('[data-tab="photos"]');
+    const total = +(await page.textContent('[data-tab="photos"]')).match(/\((\d+)\)/)[1];
+    assert(total >= 300, 'photos ' + total);
+    assert((await page.$$('[data-photo-cats] [data-cat]')).length >= 10, 'categories');
     const n1 = await page.$$eval('[data-act^="photo:"]', (e) => e.length);
     await page.click('[data-more-photos]');
     const n2 = await page.$$eval('[data-act^="photo:"]', (e) => e.length);
-    assert(n1 >= 40 && n2 > n1, `${n1} -> ${n2}`);
+    assert(n1 === 60 && n2 > n1, `${n1} -> ${n2}`);
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-photo-grid] img')].slice(0, 6).every((i) => i.complete && i.naturalWidth > 0), null, { timeout: 15000 });
+    await page.click('[data-photo-cats] [data-cat="thailand"]');
+    await page.waitForSelector('[data-photo-cats] [data-cat="thailand"].on');
+    const th = await page.$$eval('[data-act^="photo:"]', (e) => e.length);
+    assert(th >= 10 && th < n2, 'category filter ' + th);
+    await page.click('[data-photo-cats] [data-cat=""]');
+    await page.fill('[data-photo-q]', 'cat'); await page.dispatchEvent('[data-photo-q]', 'change');
+    await page.waitForFunction(() => document.querySelectorAll('[data-act^="photo:"]').length > 0);
+    const c1 = await objCount();
+    await page.click('[data-act^="photo:"] >> nth=0');
+    await page.waitForFunction((c) => __lai.canvas.getObjects().length === c + 1, c1, { timeout: 15000 });
+    assert(await ev(() => __lai.canvas.getObjects().at(-1).getSrc().startsWith('data:image')), 'photo kept inside the design');
+    await page.fill('[data-photo-q]', ''); await page.dispatchEvent('[data-photo-q]', 'change');
+    await panel('background');
+    await page.waitForSelector('[data-bg-photos] [data-act^="bgphoto:"]');
+    await page.click('[data-bg-photos] [data-act^="bgphoto:"] >> nth=0');
+    await page.waitForFunction(() => !!__lai.canvas.backgroundImage, null, { timeout: 15000 });
+    await ev(() => { __lai.canvas.backgroundImage = null; __lai.commit(); });
+    await panel('photos');
     await page.click('[data-tab="patterns"]');
     assert((await page.$$eval('[data-act^="pattern:"]', (e) => e.length)) === 72, 'patterns');
     const c0 = await objCount();
@@ -2490,7 +2515,7 @@ function meanDiff(a, b) {
     await page.click('.text-add[data-act="text:heading"]');
     await wait(400);
     const b = (await exportAs('svg', { pages: 'cur' })).toString();
-    assert(b.includes('<svg') && b.includes('<text') && b.includes('fonts.googleapis.com'), 'svg content');
+    assert(b.includes('<svg') && b.includes('<text') && b.includes('@font-face') && b.includes('data:font/woff2'), 'svg content (fonts embedded, no internet link)');
   });
   await step('[C6] ใส่ลิงก์ให้วัตถุ → คลิกได้ในไฟล์ PDF (ปกติและโรงพิมพ์) และโหมดนำเสนอ แล้วลบลิงก์ได้', async () => {
     await selectIndex(-1);
@@ -2913,6 +2938,10 @@ function meanDiff(a, b) {
     await ev(async () => { await __lai.saveNow(); });
     assert(!/ไม่สำเร็จ/.test(await page.textContent('[data-status]')), 'saves again after space is back');
     await ev(async (j) => { await __lai.canvas.loadFromJSON(JSON.parse(j)); __lai.canvas.requestRenderAll(); __lai.commit(); }, keep);
+  });
+  await step('ใช้งานได้ 100% ในเครื่อง: ตลอดการทดสอบทั้งหมด โปรแกรมไม่ดึงอะไรจากอินเทอร์เน็ตเลย (ฟอนต์ รูปถ่าย กราฟิก)', async () => {
+    const ext = [...globalThis.__external];
+    assert(!ext.length, ext.length + ' external requests: ' + ext.slice(0, 5).join(' | '));
   });
   await step('ไม่มี JavaScript error ตลอดการทดสอบ', async () => {
     assert(pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));

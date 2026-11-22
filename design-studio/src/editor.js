@@ -11,7 +11,8 @@ import { exportDesign, printDesign, pageThumb, renderPage, safeURL } from './exp
 export { safeURL };
 import { saveDesign, getDesign, listUploads, saveUpload, deleteUpload, uid } from './storage.js';
 import { PRESETS } from './presets.js';
-import { PATTERNS, PHOTO_LIBRARY } from './patterns.js';
+import { PATTERNS } from './patterns.js';
+import { loadPhotos, photoThumb, photoDataURL } from './photos.js';
 import { loadGraphics, loadIllustrations, setIllustrations, elementsHomeHTML, elementsViewHTML, elementsSearchHTML, searchMatch, makeElement, recolorGraphic } from './elements.js';
 import { docSettings, hasDoc, docDecorations, decorationObjects, decorationFonts, visibleNumber, PAGE_NUM_FORMATS, WATERMARK_PRESETS, BORDER_STYLES } from './docsetup.js';
 import { Vignette, warmthMatrix, tintMatrix, duotoneMatrix, sharpen } from './filters.js';
@@ -2762,25 +2763,37 @@ export class Editor {
       });
     } else if (p === 'photos') {
       const tab = this._photoTab || 'photos';
+      const lib = await loadPhotos();
+      const cat = this._photoCat || '';
+      const q = (this._photoQ || '').trim().toLowerCase();
       body.innerHTML = `
-        <div class="seg sm" data-photo-tabs><button class="${tab === 'photos' ? 'on' : ''}" data-tab="photos">รูปถ่าย (${PHOTO_LIBRARY.length})</button><button class="${tab === 'patterns' ? 'on' : ''}" data-tab="patterns">ลวดลาย (${PATTERNS.length})</button></div>
-        ${tab === 'photos' ? `<p class="hint">รูปถ่ายฟรีจาก Lorem Picsum (ใช้งานได้ฟรี ต้องต่ออินเทอร์เน็ต) คลิกเพื่อเพิ่มลงงาน</p>
-          <div class="photo-grid" data-photo-grid></div><button class="btn full" data-more-photos>แสดงเพิ่ม</button>`
-        : `<p class="hint">ลวดลายเวกเตอร์ ใช้ได้แม้ไม่มีอินเทอร์เน็ต คลิกเพื่อเพิ่ม หรือกด ⤢ เพื่อตั้งเป็นพื้นหลัง</p>
+        <div class="seg sm" data-photo-tabs><button class="${tab === 'photos' ? 'on' : ''}" data-tab="photos">รูปถ่าย (${lib.items.length})</button><button class="${tab === 'patterns' ? 'on' : ''}" data-tab="patterns">ลวดลาย (${PATTERNS.length})</button></div>
+        ${tab === 'photos' ? (lib.items.length ? `
+          <input class="input full search" data-photo-q placeholder="ค้นหารูป เช่น cat, temple, ภูเขา" value="${esc(this._photoQ || '')}" aria-label="ค้นหารูปถ่าย">
+          <div class="chips" data-photo-cats><button class="chip ${cat ? '' : 'on'}" data-cat="">ทั้งหมด</button>${lib.categories.map((c) => `<button class="chip ${cat === c.key ? 'on' : ''}" data-cat="${c.key}">${esc(c.th)}</button>`).join('')}</div>
+          <div class="photo-grid" data-photo-grid></div><button class="btn full" data-more-photos>แสดงเพิ่ม</button>
+          <p class="hint">รูปถ่ายในโปรแกรม (CC0 จาก Wikimedia Commons ใช้ได้ทุกงาน ไม่ต้องต่ออินเทอร์เน็ต) · กดค้าง/ชี้ที่รูปเพื่อดูชื่อและผู้ถ่าย</p>`
+          : `<p class="empty">ยังไม่มีคลังรูปถ่ายในโปรแกรม ใช้ “อัปโหลด” เพื่อใส่รูปของคุณเอง</p>`)
+        : `<p class="hint">ลวดลายเวกเตอร์ คลิกเพื่อเพิ่ม หรือกด ⤢ เพื่อตั้งเป็นพื้นหลัง</p>
           <div class="photo-grid">${PATTERNS.map((pt, i) => `<div class="up"><button class="photo" data-act="pattern:${i}" title="${esc(pt.name)}"><img src="${pt.url}" alt="${esc(pt.name)}" loading="lazy"></button><button class="up-del set-bg" data-act="bgpattern:${i}" title="ตั้งเป็นพื้นหลัง">⤢</button></div>`).join('')}</div>`}`;
       body.querySelector('[data-photo-tabs]').addEventListener('click', (e) => { const t = e.target.closest('[data-tab]'); if (t) { this._photoTab = t.dataset.tab; this.renderPanel(); } });
       const grid = body.querySelector('[data-photo-grid]');
       if (grid) {
+        const catTh = Object.fromEntries(lib.categories.map((c) => [c.key, c.th]));
+        const list = lib.items.filter((it) => (!cat || it.cat === cat) && (!q || `${it.title} ${catTh[it.cat] || ''} ${it.cat}`.toLowerCase().includes(q)));
         let shown = 0;
         const more = () => {
-          const next = PHOTO_LIBRARY.slice(shown, shown + 60);
-          grid.insertAdjacentHTML('beforeend', next.map((id) => `<button class="photo" data-act="photo:${id}" title="รูปที่ ${id}"><img src="https://picsum.photos/id/${id}/240/180" alt="" loading="lazy" onerror="this.closest('.photo').remove()"></button>`).join(''));
+          const next = list.slice(shown, shown + 60);
+          grid.insertAdjacentHTML('beforeend', next.map((it) => `<button class="photo" data-act="photo:${it.id}" title="${esc(it.title)} — ${esc(it.author)} (${esc(it.licence)})"><img src="${photoThumb(it.id)}" alt="${esc(it.title)}" loading="lazy"></button>`).join(''));
           shown += next.length;
-          body.querySelector('[data-more-photos]').hidden = shown >= PHOTO_LIBRARY.length;
+          body.querySelector('[data-more-photos]').hidden = shown >= list.length;
           this.markDraggable(grid);
         };
-        body.querySelector('[data-more-photos]').addEventListener('click', more);
-        more();
+        if (!list.length) grid.outerHTML = `<p class="empty">ไม่พบรูปที่ตรงกับ “${esc(this._photoQ || '')}”</p>`;
+        else { body.querySelector('[data-more-photos]').addEventListener('click', more); more(); }
+        body.querySelector('[data-photo-cats]').addEventListener('click', (e) => { const c = e.target.closest('[data-cat]'); if (c) { this._photoCat = c.dataset.cat; this.renderPanel(); } });
+        const qi = body.querySelector('[data-photo-q]');
+        qi.addEventListener('change', () => { this._photoQ = qi.value; this.renderPanel(); });
       }
     } else if (p === 'background') {
       const bg = this.canvas.backgroundColor;
@@ -2797,7 +2810,13 @@ export class Editor {
         <div class="sec-title">ลวดลายพื้นหลัง</div>
         <div class="photo-grid">${PATTERNS.filter((_, i) => i % 3 === 0).map((pt) => `<button class="photo" data-act="bgpattern:${PATTERNS.indexOf(pt)}" title="${esc(pt.name)}"><img src="${pt.url}" alt="" loading="lazy"></button>`).join('')}</div>
         <div class="sec-title">รูปถ่ายพื้นหลัง</div>
-        <div class="photo-grid">${PHOTO_LIBRARY.slice(0, 12).map((id) => `<button class="photo" data-act="bgphoto:${id}"><img src="https://picsum.photos/id/${id}/240/180" alt="" loading="lazy" onerror="this.closest('.photo').remove()"></button>`).join('')}</div>`;
+        <div class="photo-grid" data-bg-photos></div>`;
+      loadPhotos().then((lib) => {
+        const box = body.querySelector('[data-bg-photos]');
+        if (!box) return;
+        const pick = ['sky', 'nature', 'texture'].flatMap((c) => lib.items.filter((it) => it.cat === c && it.w > it.h).slice(0, 4));
+        box.innerHTML = pick.map((it) => `<button class="photo" data-act="bgphoto:${it.id}" title="${esc(it.title)}"><img src="${photoThumb(it.id)}" alt="" loading="lazy"></button>`).join('') || '<p class="hint">ยังไม่มีคลังรูปถ่าย</p>';
+      });
       const pk = body.querySelector('[data-bg-picker]');
       pk.addEventListener('input', () => { this.canvas.backgroundColor = pk.value; this.canvas.backgroundImage = null; this.canvas.requestRenderAll(); });
       pk.addEventListener('change', () => this.setBackground(pk.value));
@@ -2974,7 +2993,7 @@ export class Editor {
       }
       case 'brand-text': { const f = this.brandFonts()[arg]; return this.addText(arg, f ? { fontFamily: f } : undefined); }
       case 'brand-apply-fonts': return this.applyBrandFonts();
-      case 'photo': case 'bgphoto': return this.addPhoto(+arg, k === 'bgphoto');
+      case 'photo': case 'bgphoto': return this.addPhoto(arg, k === 'bgphoto');
       case 'pattern': return this.addImage(PATTERNS[+arg].url, 'ลวดลาย ' + PATTERNS[+arg].name);
       case 'bgpattern': return this.setBackgroundImage(PATTERNS[+arg].url);
       case 'bg': this.setBackground(arg); return this.renderPanel();
@@ -3036,12 +3055,7 @@ export class Editor {
     if (k === 'logo-add') return (this._logos || []).find((x) => x.id === arg)?.url;
     if (k === 'pattern') return PATTERNS[+arg]?.url;
     if (k === 'photo') {
-      try {
-        const res = await fetch(`https://picsum.photos/id/${arg}/1600/1200`);
-        if (!res.ok) throw new Error(res.status);
-        const blob = await res.blob();
-        return await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
-      } catch { toast('โหลดรูปไม่สำเร็จ (ต้องต่ออินเทอร์เน็ต)', 'error'); return null; }
+      try { return await photoDataURL(arg); } catch { toast('เปิดรูปจากคลังไม่สำเร็จ', 'error'); return null; }
     }
     if (k === 'gfx') {
       // only picture-like graphics (colour stickers / our illustrations) fill a frame
@@ -3053,17 +3067,13 @@ export class Editor {
   }
 
   async addPhoto(id, asBg) {
-    toast('กำลังโหลดรูป…');
     try {
-      const res = await fetch(`https://picsum.photos/id/${id}/1600/1200`);
-      if (!res.ok) throw new Error(res.status);
-      const blob = await res.blob();
-      const url = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+      const url = await photoDataURL(id);
       if (asBg) await this.setBackgroundImage(url);
       else await this.addImage(url, 'รูปภาพ');
     } catch (e) {
       console.error(e);
-      toast('โหลดรูปไม่สำเร็จ (ต้องต่ออินเทอร์เน็ต)', 'error');
+      toast('เปิดรูปจากคลังไม่สำเร็จ', 'error');
     }
   }
 

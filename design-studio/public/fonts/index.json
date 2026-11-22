@@ -1,0 +1,206 @@
+{
+ "kanit": {
+  "family": "Kanit",
+  "css": "kanit.css",
+  "files": 16,
+  "kb": 253
+ },
+ "prompt": {
+  "family": "Prompt",
+  "css": "prompt.css",
+  "files": 16,
+  "kb": 239
+ },
+ "sarabun": {
+  "family": "Sarabun",
+  "css": "sarabun.css",
+  "files": 16,
+  "kb": 145
+ },
+ "mitr": {
+  "family": "Mitr",
+  "css": "mitr.css",
+  "files": 8,
+  "kb": 132
+ },
+ "noto-sans-thai": {
+  "family": "Noto Sans Thai",
+  "css": "noto-sans-thai.css",
+  "files": 3,
+  "kb": 72
+ },
+ "ibm-plex-sans-thai": {
+  "family": "IBM Plex Sans Thai",
+  "css": "ibm-plex-sans-thai.css",
+  "files": 8,
+  "kb": 73
+ },
+ "chakra-petch": {
+  "family": "Chakra Petch",
+  "css": "chakra-petch.css",
+  "files": 16,
+  "kb": 120
+ },
+ "bai-jamjuree": {
+  "family": "Bai Jamjuree",
+  "css": "bai-jamjuree.css",
+  "files": 16,
+  "kb": 146
+ },
+ "k2d": {
+  "family": "K2D",
+  "css": "k2d.css",
+  "files": 16,
+  "kb": 172
+ },
+ "niramit": {
+  "family": "Niramit",
+  "css": "niramit.css",
+  "files": 16,
+  "kb": 157
+ },
+ "krub": {
+  "family": "Krub",
+  "css": "krub.css",
+  "files": 16,
+  "kb": 153
+ },
+ "mali": {
+  "family": "Mali",
+  "css": "mali.css",
+  "files": 16,
+  "kb": 213
+ },
+ "athiti": {
+  "family": "Athiti",
+  "css": "athiti.css",
+  "files": 8,
+  "kb": 126
+ },
+ "pridi": {
+  "family": "Pridi",
+  "css": "pridi.css",
+  "files": 8,
+  "kb": 130
+ },
+ "taviraj": {
+  "family": "Taviraj",
+  "css": "taviraj.css",
+  "files": 16,
+  "kb": 306
+ },
+ "trirong": {
+  "family": "Trirong",
+  "css": "trirong.css",
+  "files": 16,
+  "kb": 289
+ },
+ "charm": {
+  "family": "Charm",
+  "css": "charm.css",
+  "files": 8,
+  "kb": 116
+ },
+ "itim": {
+  "family": "Itim",
+  "css": "itim.css",
+  "files": 4,
+  "kb": 114
+ },
+ "sriracha": {
+  "family": "Sriracha",
+  "css": "sriracha.css",
+  "files": 4,
+  "kb": 99
+ },
+ "pattaya": {
+  "family": "Pattaya",
+  "css": "pattaya.css",
+  "files": 5,
+  "kb": 114
+ },
+ "chonburi": {
+  "family": "Chonburi",
+  "css": "chonburi.css",
+  "files": 4,
+  "kb": 59
+ },
+ "roboto": {
+  "family": "Roboto",
+  "css": "roboto.css",
+  "files": 18,
+  "kb": 471
+ },
+ "montserrat": {
+  "family": "Montserrat",
+  "css": "montserrat.css",
+  "files": 10,
+  "kb": 343
+ },
+ "poppins": {
+  "family": "Poppins",
+  "css": "poppins.css",
+  "files": 12,
+  "kb": 221
+ },
+ "playfair-display": {
+  "family": "Playfair Display",
+  "css": "playfair-display.css",
+  "files": 8,
+  "kb": 181
+ },
+ "merriweather": {
+  "family": "Merriweather",
+  "css": "merriweather.css",
+  "files": 10,
+  "kb": 540
+ },
+ "oswald": {
+  "family": "Oswald",
+  "css": "oswald.css",
+  "files": 5,
+  "kb": 71
+ },
+ "bebas-neue": {
+  "family": "Bebas Neue",
+  "css": "bebas-neue.css",
+  "files": 2,
+  "kb": 22
+ },
+ "anton": {
+  "family": "Anton",
+  "css": "anton.css",
+  "files": 3,
+  "kb": 57
+ },
+ "lobster": {
+  "family": "Lobster",
+  "css": "lobster.css",
+  "files": 5,
+  "kb": 127
+ },
+ "pacifico": {
+  "family": "Pacifico",
+  "css": "pacifico.css",
+  "files": 5,
+  "kb": 123
+ },
+ "dancing-script": {
+  "family": "Dancing Script",
+  "css": "dancing-script.css",
+  "files": 3,
+  "kb": 71
+ },
+ "caveat": {
+  "family": "Caveat",
+  "css": "caveat.css",
+  "files": 4,
+  "kb": 219
+ },
+ "ui-ibm-plex-sans-thai": {
+  "family": "IBM Plex Sans Thai",
+  "css": "ui-ibm-plex-sans-thai.css",
+  "files": 16,
+  "kb": 148
+ }
+}

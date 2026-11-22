@@ -3,7 +3,7 @@ import { hasDoc, docDecorations, decorationObjects, decorationFonts, visibleNumb
 const fabricNS = { Rect: FRect, Text: FText, Textbox: FTextbox };
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
-import { ensureFonts, fontsInJSON, fontCssUrl, FONT_NAMES } from './fonts.js';
+import { ensureFonts, fontsInJSON, fontFaceInline, FONT_NAMES } from './fonts.js';
 import { buildCmykPdf } from './cmyk.js';
 import { util as fabricUtil, Point } from 'fabric';
 import sarabunURL from './assets/Sarabun-Regular.ttf?url';
@@ -139,8 +139,9 @@ export async function pageToSVG(design, pageArg) {
   sc.dispose();
   const fonts = fontsInJSON(json).filter((f) => FONT_NAMES.includes(f));
   if (fonts.length) {
-    const imports = fonts.map((f) => `@import url('${fontCssUrl(f).replace(/&/g, '&amp;')}');`).join('\n');
-    svg = svg.replace(/<defs>/, `<defs>\n<style type="text/css">${imports}</style>`);
+    // fonts travel inside the file (no internet link), so the SVG looks right anywhere, offline too
+    const faces = (await Promise.all(fonts.map((f) => fontFaceInline(f).catch(() => '')))).join('\n');
+    if (faces) svg = svg.replace(/<defs>/, `<defs>\n<style type="text/css"><![CDATA[\n${faces}\n]]></style>`);
   }
   return svg;
 }

@@ -40,13 +40,26 @@ export const FONTS = [
 
 export const FONT_NAMES = FONTS.map((f) => f[0]);
 
+/** Fonts ship with the app (public/fonts, fetched by tools/fetch_fonts.py): no internet needed. */
+export const fontSlug = (family) => family.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 export function fontCssUrl(family) {
-  const f = FONTS.find((x) => x[0] === family);
-  const name = family.replace(/ /g, '+');
-  let spec = '';
-  if (f && f[1] === 'i') spec = ':ital,wght@0,400;0,700;1,400;1,700';
-  else if (f && f[1] === 'b') spec = ':wght@400;700';
-  return `https://fonts.googleapis.com/css2?family=${name}${spec}&display=swap`;
+  return new URL(`fonts/${fontSlug(family)}.css`, document.baseURI).href;
+}
+
+/** The font's @font-face rules with every file inlined as a data URL (for files that leave the app, e.g. SVG). */
+export async function fontFaceInline(family) {
+  const url = fontCssUrl(family);
+  const css = await (await fetch(url)).text();
+  const files = [...new Set([...css.matchAll(/url\(([^)]+)\)/g)].map((m) => m[1]))];
+  const data = {};
+  await Promise.all(files.map(async (f) => {
+    const b = await (await fetch(new URL(f, url))).arrayBuffer();
+    let bin = '';
+    const u8 = new Uint8Array(b);
+    for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+    data[f] = `data:font/woff2;base64,${btoa(bin)}`;
+  }));
+  return css.replace(/\/\*[^]*?\*\//g, '').replace(/url\(([^)]+)\)/g, (m, f) => `url(${data[f]})`);
 }
 
 const linked = new Map();

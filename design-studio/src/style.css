@@ -683,3 +683,4 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 
 /* format cards never force the dialog wider than a small phone */
 .fmt { min-width: 0; } .fmt b, .fmt small { overflow-wrap: anywhere; }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding: 8px 0; scrollbar-width: thin; } .chips .chip { flex: 0 0 auto; }
