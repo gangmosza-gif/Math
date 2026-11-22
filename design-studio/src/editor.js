@@ -6,7 +6,7 @@ import { icon, LIBRARY_ICONS } from './icons.js';
 import { esc, h, toast, modal, confirmDialog, popover, closePopover, currentPopoverId } from './ui.js';
 import { FONTS, ensureFont, ensureFonts, fontsInJSON, linkAllFonts } from './fonts.js';
 import { SHAPES, LINES, STICKERS, makeSticker, shapePreviewSVG } from './shapes.js';
-import { TEMPLATES, TEMPLATE_CATEGORIES, buildTemplate, templateFonts, pageGradient } from './templates.js';
+import { TEMPLATES, TEMPLATE_CATEGORIES, buildTemplate, templateFonts, pageGradient, loadTemplatePage } from './templates.js';
 import { exportDesign, printDesign, pageThumb, renderPage, safeURL } from './export.js';
 export { safeURL };
 import { saveDesign, getDesign, listUploads, saveUpload, deleteUpload, uid } from './storage.js';
@@ -2597,7 +2597,7 @@ export class Editor {
       body.innerHTML = `<p class="hint">คลิกเทมเพลตเพื่อใช้กับหน้านี้ (ถ้าหน้ามีของอยู่แล้วจะเพิ่มเป็นหน้าใหม่) ทุกเทมเพลตปรับตามขนาดงานอัตโนมัติ</p>
         <input class="input full search" data-tpl-search placeholder="ค้นหาเทมเพลต เช่น ใบงาน, เมนู, ไทม์ไลน์ (${TEMPLATES.length} แบบ)" aria-label="ค้นหาเทมเพลต" />
         <div class="chip-row" data-tpl-cats>${TEMPLATE_CATEGORIES.map((c, i) => `<button class="chip ${i === 0 ? 'on' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>
-        <div class="tpl-grid">${TEMPLATES.map((t, i) => [t, i]).sort((a, b) => !!b[0].page - !!a[0].page).map(([t, i]) => `<button class="tpl" data-act="tpl:${i}" data-cat="${esc(t.cat || '')}" title="${esc(t.name)} · ${esc(t.cat || '')}"><div class="tpl-img" data-tpl-img="${i}" style="aspect-ratio:${this.W}/${this.H}"></div><span>${esc(t.name)}</span></button>`).join('')}</div>
+        <div class="tpl-grid">${TEMPLATES.map((t, i) => [t, i]).sort((a, b) => !!b[0].pro - !!a[0].pro).map(([t, i]) => `<button class="tpl" data-act="tpl:${i}" data-cat="${esc(t.cat || '')}" title="${esc(t.name)} · ${esc(t.cat || '')}"><div class="tpl-img" data-tpl-img="${i}" style="aspect-ratio:${this.W}/${this.H}"></div><span>${esc(t.name)}</span></button>`).join('')}</div>
         <p class="empty" data-tpl-empty hidden>ไม่พบเทมเพลตที่ค้นหา</p>`;
       let cat = 'ทั้งหมด';
       const filter = () => {
@@ -2870,6 +2870,7 @@ export class Editor {
         if (!el) continue;
         if (!cache[i]) {
           const t = TEMPLATES[i];
+          await loadTemplatePage(t);
           await ensureFonts(templateFonts(t));
           const { objects, background } = buildTemplate(t, W, H);
           const json = { version: '6.9.1', objects: objects.map((o) => o.toObject()), background: background.toObject ? background.toObject() : background };
@@ -2901,6 +2902,7 @@ export class Editor {
   async applyTemplate(i) {
     const t = TEMPLATES[i];
     toast('กำลังใช้เทมเพลต…');
+    await loadTemplatePage(t);
     await Promise.race([ensureFonts(templateFonts(t)), new Promise((r) => setTimeout(r, 3000))]);
     const { objects, background } = buildTemplate(t, this.W, this.H);
     const json = JSON.stringify({ version: '6.9.1', objects: objects.map((o) => o.toObject(EXTRA)), background: background.toObject ? background.toObject() : background });

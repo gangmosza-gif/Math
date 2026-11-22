@@ -10,7 +10,7 @@ import { PRESETS } from './presets.js';
 import { listDesigns, getDesign, saveDesign, deleteDesign, deleteVersionsOf, uid } from './storage.js';
 import { icon } from './icons.js';
 import { hostDownloadsReady, renderPage } from './export.js';
-import { TEMPLATES, TEMPLATE_CATEGORIES, buildTemplate, templateFonts } from './templates.js';
+import { TEMPLATES, TEMPLATE_CATEGORIES, buildTemplate, templateFonts, loadTemplatePage } from './templates.js';
 import { ensureFonts } from './fonts.js';
 
 // as a claude.ai Artifact, get the platform's file-save ready early (no-op in a normal browser)
@@ -62,13 +62,13 @@ const SHORTCUTS = [
   { label: 'สมการ', ic: 'bulb', g: ['#f0abfc', '#c026d3'], go: () => fromPreset(6, { act: 'smart:equation' }) },
   { label: 'ชุดแบรนด์', ic: 'star', g: ['#fdba74', '#ea580c'], go: () => fromPreset(0, { panel: 'brand' }) },
 ];
-const PRO_PICKS = TEMPLATES.map((t, i) => (t.page ? i : -1)).filter((i) => i >= 0);
+const PRO_PICKS = TEMPLATES.map((t, i) => (t.pro ? i : -1)).filter((i) => i >= 0);
 const PICKS = [...PRO_PICKS, 0, 3, 2, 9, 4, 6, 37, 17, 1, 5, 82, 67];
 const CAT_TINT = ['#efe7ff', '#ffe8dc', '#dff3ef', '#ffe3ef', '#e3edff', '#fff4d6', '#e8f6e0', '#f3e8ff', '#ffe9e9', '#e1f4fb', '#f1f1f1'];
 
 /** Size a template is shown and created in: slides 16:9, school/notice/infographic A4, others square. */
 function tplPreset(t) {
-  if (t.cat === 'นำเสนอ' || t.page) return 5;
+  if (t.cat === 'นำเสนอ' || t.pro) return 5;
   if (['การศึกษา', 'ประกาศ', 'อินโฟกราฟิก'].includes(t.cat)) return 6;
   return 0;
 }
@@ -81,6 +81,7 @@ function templateThumb(i, preset) {
   if (!thumbCache.has(key)) {
     thumbCache.set(key, (thumbQueue = thumbQueue.then(async () => {
       const t = TEMPLATES[i], p = PRESETS[preset];
+      await loadTemplatePage(t);
       await Promise.race([ensureFonts(templateFonts(t)), new Promise((r) => setTimeout(r, 2500))]);
       const { objects, background } = buildTemplate(t, p.w, p.h);
       const json = { version: '6.9.1', objects: objects.map((o) => o.toObject()), background: background.toObject ? background.toObject() : background };

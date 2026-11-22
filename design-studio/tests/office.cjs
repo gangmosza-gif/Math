@@ -100,6 +100,7 @@ const SAMPLES = [
   { key: 'a4', preset: 6, title: 'เอกสาร A4: ใบงาน + ประกาศ + เกียรติบัตร', build: ['tpl:2', 'tpl:6', 'tpl:3'] },
   { key: 'charts', preset: 5, title: 'กราฟหลายชุดข้อมูล 16:9 (แท่งกลุ่ม แท่งซ้อน แท่งซ้อน 100% แนวนอน เส้น เส้นโค้ง พื้นที่ซ้อน เรดาร์)', build: 'charts' },
   { key: 'pro', preset: 5, title: 'พรีเซนต์มืออาชีพ 16:9: การเงินผู้บริหาร + เปิดตัวผลิตภัณฑ์ + ผลแคมเปญการตลาด', build: ['tpl:pro-finance', 'tpl:pro-product', 'tpl:pro-marketing'] },
+  { key: 'themes', preset: 5, title: 'ชุดเทมเพลตใหม่ 16:9: ข้อเสนอโครงการ + Mind Map + การ์ตูนย้อนยุค + แนะนำบริษัท', build: ['tpl:proposal-timeline', 'tpl:mindmap-steps', 'tpl:retro-agenda', 'tpl:company-about'] },
   { key: 'slides', preset: 5, title: 'สไลด์ 16:9: หน้าแรก + เชิญร่วมงาน + โปรโมชัน + เมนู', build: ['tpl:7', 'tpl:5', 'tpl:0', 'tpl:9'] },
 ];
 

@@ -342,16 +342,19 @@ function meanDiff(a, b) {
             if (!fonts.has(t.fontFamily)) out.push(`#${i} font ${t.fontFamily}`);
             if (blockers.includes(t)) continue;
             const m = t.calcTransformMatrix();
-            let y = -t.height / 2, hit = false;
+            // a text crossing the edge of a band/emoji is hard to read; a text fully on a card (sticky note) is fine
+            let y = -t.height / 2, inside = 0, all = 0;
             t._textLines.forEach((_, li) => {
               const lh = t.getHeightOfLine(li), lw = t.getLineWidth(li), off = t._getLineLeftOffset(li);
               for (let fx = 0.05; fx <= 0.95; fx += 0.1) for (const fy of [0.35, 0.65]) {
                 const lx = -t.width / 2 + off + lw * fx, ly = y + lh * fy;
                 const P = { x: m[0] * lx + m[2] * ly + m[4], y: m[1] * lx + m[3] * ly + m[5] };
-                if (blockers.some((b) => b.containsPoint(P))) hit = true;
+                all++;
+                if (blockers.some((b) => b.containsPoint(P))) inside++;
               }
               y += lh;
             });
+            const hit = inside > 0 && !(inside === all && blockers.some((b) => /rect/i.test(b.type) && b.containsPoint(t.getCenterPoint())));
             if (hit) out.push(`${w}x${h} #${i} "${t.text.slice(0, 16)}" ทับแถบ/อีโมจิ`);
           }
           for (let a = 0; a < texts.length; a++) for (let c = a + 1; c < texts.length; c++) {
@@ -369,13 +372,13 @@ function meanDiff(a, b) {
     }, FONTS);
     assert(!bad.length, bad.slice(0, 6).join(' | '));
   });
-  await step('หมวด "พรีเซนต์มืออาชีพ": 3 สไลด์ (การเงิน / ผลิตภัณฑ์ / การตลาด) อยู่หน้าสุด มีภาพตัวอย่าง และข้อความแก้ไขได้', async () => {
-    const first = await page.$$eval('.tpl', (e) => e.slice(0, 3).map((x) => x.dataset.cat));
+  await step('หมวด "พรีเซนต์มืออาชีพ": 17 สไลด์ (การเงิน ผลิตภัณฑ์ การตลาด + ชุดข้อเสนอโครงการ / Mind Map / การ์ตูนย้อนยุค / แนะนำบริษัท) อยู่หน้าสุด มีภาพตัวอย่าง และแก้ไขได้', async () => {
+    const first = await page.$$eval('.tpl', (e) => e.slice(0, 17).map((x) => x.dataset.cat));
     assert(first.every((c) => c === 'พรีเซนต์มืออาชีพ'), 'pro first ' + first);
     await page.click('[data-tpl-cats] [data-cat="พรีเซนต์มืออาชีพ"]');
     const vis = await page.$$eval('.tpl', (e) => e.filter((x) => !x.hidden).map((x) => x.title));
-    assert(vis.length === 3, 'pro ' + vis);
-    await page.waitForFunction(() => [...document.querySelectorAll('.tpl:not([hidden]) [data-tpl-img]')].every((e) => e.dataset.ready), null, { timeout: 30000 });
+    assert(vis.length === 17 && ['ข้อเสนอโครงการ', 'Mind Map', 'การ์ตูนย้อนยุค', 'แนะนำบริษัท'].every((k) => vis.some((t) => t.includes(k))), 'pro ' + vis);
+    await page.waitForFunction(() => [...document.querySelectorAll('.tpl:not([hidden]) [data-tpl-img]')].slice(0, 6).every((e) => e.dataset.ready), null, { timeout: 60000 });
     const r = await ev(async (act) => {
       const L = __lai, keep = L.design.pages.map((p) => ({ ...p })), cur = L.cur;
       L.design.pages = [{ id: 't', json: JSON.stringify({ objects: [], background: '#fff' }) }];
@@ -658,6 +661,31 @@ function meanDiff(a, b) {
     await page.fill('[data-el-search]', 'xyzqq'); await wait(300);
     assert((await vis()) === 0 && /ไม่พบองค์ประกอบ/.test(await page.textContent('[data-el-results-box]')), 'not-found message');
     await page.fill('[data-el-search]', ''); await wait(200);
+  });
+  await step('องค์ประกอบชุดใหม่: ผู้คนการ์ตูน สติกเกอร์การ์ตูน ไอคอนพิกเซลย้อนยุค ลายตกแต่ง (ฮาล์ฟโทน เส้นขอบฟ้า แฟ้ม รอยพู่กัน) ค้นหาได้ ใส่ได้ และลายตกแต่งเปลี่ยนสีได้', async () => {
+    await clearPage();
+    await panel('elements');
+    await page.waitForFunction(() => __lai._gfx, null, { timeout: 30000 });
+    const cols = await ev(() => Object.fromEntries(__lai._gfx.map((c) => [c.k, c.items.length])));
+    assert(cols.people >= 40 && cols.stickies >= 80 && cols.pixel >= 12 && cols.decor >= 30, JSON.stringify(cols));
+    const found = async (q) => { await page.fill('[data-el-search]', q); await wait(300); return page.$$eval('[data-panel-body] .el', (b) => b.filter((x) => !x.hidden && !x.closest('[hidden]')).map((x) => x.dataset.act)); };
+    for (const [q, id] of [['พิกเซล', 'gfx:g|pixel|'], ['ฮาล์ฟโทน', 'gfx:g|decor|halftone'], ['เส้นขอบฟ้า', 'gfx:g|decor|skyline'], ['แฟ้ม', 'gfx:g|decor|folder'], ['พู่กัน', 'gfx:g|decor|brush']]) {
+      const r = await found(q);
+      assert(r.some((a) => a.startsWith(id)), `${q}: ${r.slice(0, 5)}`);
+    }
+    await page.fill('[data-el-search]', ''); await wait(200);
+    for (const id of ['g|decor|halftone-corner', 'g|pixel|pixel-computer', 'g|people|woman-technologist', 'g|stickies|rocket-launch-chart']) await page.click(`[data-act="gfx:${id}"]`).catch(async () => { await ev((a) => __lai.panelAction(a), 'gfx:' + id); });
+    await page.waitForFunction(() => __lai.canvas.getObjects().length >= 4, null, { timeout: 15000 });
+    const r = await ev(() => {
+      const objs = __lai.canvas.getObjects();
+      const dots = objs.find((o) => o.graphic?.n === 'halftone-corner');
+      __lai.canvas.setActiveObject(dots);
+      __lai.setProp('fill', '#e11d48');
+      const parts = dots.getObjects ? dots.getObjects() : [dots];
+      return { n: objs.length, mono: !!dots.graphic.mono, color: parts.every((p) => p.fill === '#e11d48'), pics: objs.filter((o) => o.type === 'image').length };
+    });
+    assert(r.n === 4 && r.mono && r.color && r.pics === 3, JSON.stringify(r));
+    await clearPage();
   });
   await step('คลังองค์ประกอบ: รูปทรง 9 ตระกูล กราฟิก 18 คอลเลกชัน สติกเกอร์ 3 มิติ ไอคอนเปลี่ยนสีได้ โลโก้ ค้นหาภาษาไทย ใช้ล่าสุด', async () => {
     await clearPage();

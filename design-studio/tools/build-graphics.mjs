@@ -12,8 +12,9 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { decorItems, pixelItems } from './decor.mjs';
 
-const SETS = ['fluent-emoji', 'fluent-emoji-flat', 'fluent-color', 'tabler', 'simple-icons', 'streamline-freehand-color', 'streamline-kameleon-color'];
+const SETS = ['fluent-emoji', 'fluent-emoji-flat', 'fluent-color', 'tabler', 'simple-icons', 'streamline-freehand-color', 'streamline-kameleon-color', 'streamline-stickies-color'];
 let dir = process.argv[2];
 if (!dir) {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lai-gfx-'));
@@ -79,6 +80,15 @@ flat('faces', 'อีโมจิและท่าทาง', ['grinning-face',
 
 // 3D-style (gradients + soft shadows): a hand-picked showcase
 add({ k: '3d', title: 'สติกเกอร์ 3 มิติ', kind: 'color', ...FLUENT }, 'fluent-emoji', pick('fluent-emoji', ['star', 'glowing-star', 'sparkles', 'red-heart', 'fire', 'rocket', 'trophy', 'crown', 'gem-stone', 'wrapped-gift', 'balloon', 'party-popper', 'light-bulb', 'books', 'graduation-cap', 'money-bag', 'chart-increasing', 'megaphone', 'bell', 'alarm-clock', 'laptop', 'mobile-phone', 'camera', 'rainbow', 'sun', 'cloud', 'snowflake', 'four-leaf-clover', 'cherry-blossom', 'cat-face', 'dog-face', 'panda', 'unicorn', 'smiling-face-with-heart-eyes', 'thumbs-up', 'hundred-points', 'check-mark-button', 'cross-mark', 'direct-hit', 'puzzle-piece', 'shopping-bags', 'globe-showing-asia-australia', 'thought-balloon', 'speech-balloon', 'magnifying-glass-tilted-left', 'calendar', 'pushpin', 'heart-with-ribbon', 'soccer-ball', 'teddy-bear']));
+
+// cartoon people (Fluent Emoji flat, default skin tone)
+add({ k: 'people', title: 'ผู้คนการ์ตูน', kind: 'color', ...FLUENT }, 'fluent-emoji-flat', pick('fluent-emoji-flat', ['woman-technologist', 'man-technologist', 'woman-office-worker', 'man-office-worker', 'woman-teacher', 'man-teacher', 'woman-student', 'man-student', 'woman-raising-hand', 'man-raising-hand', 'woman-tipping-hand', 'man-tipping-hand', 'woman-gesturing-ok', 'man-gesturing-ok', 'woman-gesturing-no', 'man-gesturing-no', 'woman-bowing', 'man-bowing', 'woman-shrugging', 'man-shrugging', 'woman-facepalming', 'man-facepalming', 'woman-scientist', 'man-scientist', 'woman-health-worker', 'man-health-worker', 'woman-cook', 'man-cook', 'woman-artist', 'man-artist', 'woman-singer', 'man-singer', 'woman-farmer', 'man-farmer', 'woman-mechanic', 'man-mechanic', 'woman-walking', 'man-walking', 'woman-running', 'man-running', 'girl', 'boy', 'woman', 'man', 'older-woman', 'older-man', 'baby', 'family', 'people-holding-hands', 'woman-and-man-holding-hands', 'person-raising-hand', 'person-tipping-hand', 'detective', 'ninja', 'superhero', 'astronaut']).map((n) => n));
+// cartoon stickers (Streamline Stickies Color)
+add({ k: 'stickies', title: 'สติกเกอร์การ์ตูน', kind: 'color', license: 'CC BY 4.0', credit: 'Streamline Stickies Color – streamlinehq.com (CC BY 4.0)' }, 'streamline-stickies-color',
+  Object.keys(data['streamline-stickies-color'].icons).filter((n) => !/-duo$/.test(n)));
+// our own: retro pixel icons (colour) and slide decorations (single colour, recolourable)
+collections.push({ k: 'pixel', title: 'ไอคอนพิกเซลย้อนยุค', kind: 'color', license: 'CC0', credit: 'Lai Studio (วาดเอง ใช้ได้อิสระ)', set: 'lai', items: pixelItems() });
+collections.push({ k: 'decor', title: 'ลายตกแต่งงานนำเสนอ', kind: 'mono', mode: 'fill', license: 'CC0', credit: 'Lai Studio (วาดเอง ใช้ได้อิสระ)', set: 'lai', items: decorItems() });
 
 // business / education illustration icons: Fluent UI Color, the largest size of each
 {

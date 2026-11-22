@@ -112,12 +112,16 @@ def acceptable(p, term=''):
     return {'title': re.sub(r'^File:|\.[a-z]+$', '', title, flags=re.I), 'licence': lic,
             'author': clean(m.get('Artist', {}).get('value', ''))[:80] or 'ไม่ระบุ',
             'page': 'https://commons.wikimedia.org/wiki/' + urllib.parse.quote(title.replace(' ', '_')),
-            'src': ii.get('thumburl') or ii.get('url')}, 'ok'
+            'src': ii.get('thumburl') or ii.get('url'), 'orig': ii.get('url'), 'bytes': ii.get('size', 0)}, 'ok'
 
 
 def save(item, cat):
     # the main media host serves the same standard thumbnails and is far less strict than thumb.wikimedia.org
-    raw = http(item['src'].replace('://thumb.wikimedia.org/', '://upload.wikimedia.org/'))
+    # the original file when it is not huge (thumbnail requests are rate-limited much harder), else the standard thumbnail
+    if item.get('bytes', 0) > 25_000_000:
+        raise RuntimeError('file too large')
+    url = item.get('orig') or item['src'].replace('://thumb.wikimedia.org/', '://upload.wikimedia.org/')
+    raw = http(url)
     time.sleep(PAUSE)
     im = Image.open(io.BytesIO(raw))
     im = im.convert('RGB')
@@ -144,7 +148,10 @@ def main():
     mpath = os.path.join(OUT, 'manifest.json')
     man = json.load(open(mpath)) if os.path.exists(mpath) else {'categories': [], 'items': []}
     have = {it['page'] for it in man['items']}
-    man['categories'] = [{'key': k, 'th': th} for k, th, _, _ in CATEGORIES]
+    # keep categories already in the library, add/rename the ones fetched now
+    cats = {c['key']: c['th'] for c in man['categories']}
+    cats.update({k: th for k, th, _, _ in CATEGORIES})
+    man['categories'] = [{'key': k, 'th': th} for k, th in cats.items()]
     test = '--test' in sys.argv
     for key, th, terms, want in CATEGORIES:
         count = sum(1 for it in man['items'] if it['cat'] == key)

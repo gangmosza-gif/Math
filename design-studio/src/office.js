@@ -786,7 +786,8 @@ export async function buildDocx(design, pages, onProgress = () => {}, { mode = '
     // a text/table that sits below it in the design, in which case it floats in front of the text.
     const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
     model.items.forEach((it, i) => {
-      if (it.kind === 'image' || it.kind === 'chart') it.front = model.items.slice(0, i).some((t) => (t.kind === 'text' || t.kind === 'table') && overlaps(t, it));
+      // …and a picture above such a front picture stays above it (front as well), keeping the design's order
+      if (it.kind === 'image' || it.kind === 'chart') it.front = model.items.slice(0, i).some((t) => ((t.kind === 'text' || t.kind === 'table') || t.front) && overlaps(t, it));
     });
     if (mode === 'flow') {
       flow.push(...flowPage(model, anchors, () => z++, n));

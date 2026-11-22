@@ -3,8 +3,9 @@
 import { Rect, Circle, Textbox, Polygon, Line, Gradient } from 'fabric';
 
 import { GENERATED_TEMPLATES } from './templates2.js';
-// pro presentation slides built with the app's own tools (tools/build_pro_templates.cjs)
-import PRO_TEMPLATES from './protemplates.json';
+// pro presentation slides built with the app's own tools (tools/build_pro_templates.cjs):
+// the index is small; the pages (protemplates.json) load the first time one is needed
+import PRO_INDEX from './protemplates-index.json';
 
 export const PRO_CATEGORY = 'พรีเซนต์มืออาชีพ';
 
@@ -152,7 +153,7 @@ export const TEMPLATES = [
     ],
   },
   ...GENERATED_TEMPLATES,
-  ...PRO_TEMPLATES.map((t) => ({ ...t, cat: PRO_CATEGORY, items: [] })),
+  ...PRO_INDEX.map((t) => ({ ...t, cat: PRO_CATEGORY, items: [], pro: true, page: null })),
 ];
 
 export const TEMPLATE_CATEGORIES = ['ทั้งหมด', PRO_CATEGORY, ...new Set(TEMPLATES.map((t) => t.cat).filter((c) => c !== PRO_CATEGORY))];
@@ -180,8 +181,22 @@ export function pageGradient(a, b, W, H) {
 }
 
 /** Build the fabric objects of a template for a W×H page. */
+let proPages = null;
+/** Load the pages of the pro templates (once); call before buildTemplate. */
+export async function loadTemplatePage(tpl) {
+  if (!tpl || !tpl.pro || tpl.page) return;
+  proPages ||= import('./protemplates.json').then((m) => {
+    const byId = Object.fromEntries(m.default.map((x) => [x.id, x.page]));
+    for (const t of TEMPLATES) if (t.pro) t.page = byId[t.id];
+  });
+  await proPages;
+}
+
 export function buildTemplate(tpl, W, H) {
-  if (tpl.page) return buildPageTemplate(tpl, W, H);
+  if (tpl.pro) {
+    if (!tpl.page) throw new Error('template page not loaded: ' + tpl.id);
+    return buildPageTemplate(tpl, W, H);
+  }
   const u = Math.min(W, H);
   const objs = [];
   for (const it of tpl.items) {
@@ -278,7 +293,7 @@ function pageFonts(objs, out = new Set()) {
 }
 
 export function templateFonts(tpl) {
-  if (tpl.page) return [...pageFonts(tpl.page.objects)].filter((f) => f !== 'sans-serif');
+  if (tpl.pro) return tpl.fonts || [];
   return [...new Set(tpl.items.filter((i) => i.font && i.font !== 'sans-serif').map((i) => i.font))];
 }
 

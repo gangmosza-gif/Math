@@ -13,3 +13,4 @@
 | e46745a490 | ธรรมชาติ ภูเขา ทะเล | Mountain and Landscape | Unknown authorUnknown author | CC0 | [Commons](https://commons.wikimedia.org/wiki/File%3AMountain_and_Landscape.jpg) |
 | b06889fd14 | ธรรมชาติ ภูเขา ทะเล | Mountain Glacier Landscape (from AvoPix) | Unknown @ AvoPix.com | CC0 | [Commons](https://commons.wikimedia.org/wiki/File%3AMountain_Glacier_Landscape_%28from_AvoPix%29.jpg) |
 | 6022dbf4b2 | ธรรมชาติ ภูเขา ทะเล | Lake Mountain Landscape | Bonnie Moreland | CC0 | [Commons](https://commons.wikimedia.org/wiki/File%3ALake_Mountain_Landscape.jpg) |
+| bf2c4403ff | เมือง อาคาร | Hong Kong skyscrapers in a night of typhoon | Wilfredor | CC0 | [Commons](https://commons.wikimedia.org/wiki/File%3AHong_Kong_skyscrapers_in_a_night_of_typhoon.jpg) |
