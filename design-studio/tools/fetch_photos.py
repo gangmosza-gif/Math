@@ -59,7 +59,7 @@ def http(url, tries=6):
         except urllib.error.HTTPError as e:
             if e.code == 429 or e.code >= 500:
                 wait = int(e.headers.get('retry-after') or 0) or 20 * (i + 1)
-                print(f'    server busy ({e.code}), waiting {wait}s')
+                print(f'    server busy ({e.code}) on {url.split("?")[0][:70]}, waiting {wait}s', flush=True)
                 time.sleep(wait)
                 continue
             raise
@@ -116,7 +116,8 @@ def acceptable(p, term=''):
 
 
 def save(item, cat):
-    raw = http(item['src'])
+    # the main media host serves the same standard thumbnails and is far less strict than thumb.wikimedia.org
+    raw = http(item['src'].replace('://thumb.wikimedia.org/', '://upload.wikimedia.org/'))
     time.sleep(PAUSE)
     im = Image.open(io.BytesIO(raw))
     im = im.convert('RGB')
@@ -176,7 +177,7 @@ def main():
                 if test:
                     print('test ok:', rec)
                     return
-            print(f'  {th}: "{term}" +{got} → {count}/{want}')
+            print(f'  {th}: "{term}" +{got} → {count}/{want}', flush=True)
     write_credits(man)
     size = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(OUT) for f in fs)
     print(f'library: {len(man["items"])} photos, {size / 1024 / 1024:.0f} MB')
