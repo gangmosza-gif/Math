@@ -634,6 +634,7 @@ export const features = {
       const nxImg = ov.querySelector('[data-next]');
       const nxi = order[pos + 1];
       nxImg.hidden = nxi === undefined;
+      nxImg.closest('.pn-next').hidden = nxi === undefined; // last slide: no "next slide" box at all
       if (nxi !== undefined) {
         if (!cache.has(nxi)) cache.set(nxi, pageToDataURL(this.design, this.design.pages[nxi], { format: 'jpeg', multiplier: mult, quality: 0.92 }));
         cache.get(nxi).then((u) => { if (order[pos + 1] === nxi) nxImg.src = u; });

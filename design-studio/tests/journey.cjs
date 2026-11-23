@@ -698,6 +698,101 @@ const stage = (n, title) => { group = `${n}. ${title}`; console.log('\n' + group
     await step('ภาพหน้าจอขั้น 7', async () => { await ev(() => { __lai.canvas.discardActiveObject(); __lai.canvas.requestRenderAll(); }); await page.screenshot({ path: path.join(OUT, 'stage7.png') }); });
   }
 
+  // ================================================================== 8. pages, notes, presenting
+  const pages = () => ev(() => ({ n: __lai.design.pages.length, cur: __lai.cur, hidden: __lai.design.pages.map((p) => !!p.hidden) }));
+  if (stage(8, 'หลายหน้า: เพิ่ม ทำสำเนา ย้าย ซ่อน ลบ หน้าเทมเพลต โน้ตผู้บรรยาย และโหมดนำเสนอ')) {
+    let page1Objects;
+    await step('ทำสำเนาหน้า 1 (ปุ่มด้านล่าง): หน้าใหม่มีของครบเท่าหน้าเดิม', async () => {
+      await page.keyboard.press('Escape');
+      page1Objects = (await objs()).length;
+      await page.click('[data-act="page-dup"]');
+      await page.waitForFunction(() => __lai.design.pages.length === 2);
+      await wait(400);
+      const r = await pages();
+      const n = (await objs()).length;
+      assert(r.cur === 1 && n === page1Objects, JSON.stringify({ r, n, page1Objects }));
+      return `หน้า 2 มี ${n} ชิ้น`;
+    });
+    await step('เพิ่มหน้าว่าง แล้วใส่เทมเพลต "ข้อเสนอโครงการ · วัตถุประสงค์" จากแผงเทมเพลต', async () => {
+      await page.click('[data-act="page-add"]');
+      await page.waitForFunction(() => __lai.design.pages.length === 3 && __lai.canvas.getObjects().length === 0);
+      await openPanel('templates');
+      await page.fill('[data-tpl-search]', 'วัตถุประสงค์');
+      await page.click('.tpl:not([hidden]) >> nth=0');
+      await page.waitForFunction(() => __lai.canvas.getObjects().length > 10, null, { timeout: 20000 });
+      const r = await pages();
+      const texts = await ev(() => __lai.canvas.getObjects().filter((o) => o.text).map((o) => o.text));
+      assert(r.n === 3 && texts.some((t) => t.includes('วัตถุประสงค์')), JSON.stringify({ r, texts: texts.slice(0, 3) }));
+      await page.fill('[data-tpl-search]', '');
+      return `${texts.length} ข้อความ`;
+    });
+    await step('แก้ข้อความบนหน้าเทมเพลต (ดับเบิลคลิกหัวเรื่อง พิมพ์ใหม่)', async () => {
+      const i = await idxOf("o.text && o.text.includes('วัตถุประสงค์')");
+      const c = await centerOf(i);
+      await page.mouse.dblclick(c.x, c.y);
+      await wait(300);
+      await page.keyboard.press('Control+A');
+      await page.keyboard.type('เป้าหมายของโครงการปีนี้', { delay: 10 });
+      await page.keyboard.press('Escape');
+      const t = await ev((i) => __lai.canvas.getObjects()[i].text, i);
+      assert(t === 'เป้าหมายของโครงการปีนี้', t);
+    });
+    await step('ใส่ชื่อหน้าและโน้ตผู้บรรยาย (ภาษาไทยหลายบรรทัด)', async () => {
+      await page.click('[data-act="page-notes"]');
+      await page.fill('.modal [data-title]', 'เป้าหมาย');
+      await page.fill('.modal [data-notes]', 'เล่าเป้าหมาย 3 ข้อ\nเน้นข้อ 2 เรื่องรถติด');
+      await page.click('.modal [data-go]');
+      const p = await ev(() => __lai.design.pages[__lai.cur]);
+      assert(p.title === 'เป้าหมาย' && p.notes === 'เล่าเป้าหมาย 3 ข้อ\nเน้นข้อ 2 เรื่องรถติด', JSON.stringify({ t: p.title, n: p.notes }));
+    });
+    await step('ย้ายหน้า 3 ขึ้นมาเป็นหน้า 2 (ปุ่มเลื่อนซ้าย) แล้วคลิกภาพย่อหน้า 1 เพื่อกลับไป', async () => {
+      await page.click('[data-act="page-left"]');
+      const r = await ev(() => ({ cur: __lai.cur, title1: __lai.design.pages[1].title }));
+      await page.click('.page-thumb[data-page="0"]');
+      await page.waitForFunction(() => __lai.cur === 0);
+      await wait(300);
+      const n0 = (await objs()).length;
+      assert(r.cur === 1 && r.title1 === 'เป้าหมาย' && n0 === page1Objects, JSON.stringify({ r, n0 }));
+    });
+    await step('ซ่อนหน้า 3 (สำเนา) แล้วลบมันทิ้ง: เหลือ 2 หน้า ข้อมูลหน้าอื่นไม่หาย', async () => {
+      await page.click('.page-thumb[data-page="2"]');
+      await page.waitForFunction(() => __lai.cur === 2);
+      await page.click('[data-act="page-hide"]');
+      const h = (await pages()).hidden;
+      await page.click('[data-act="page-del"]');
+      await wait(300);
+      const r = await pages();
+      const t = await ev(() => __lai.design.pages.map((p) => p.title || ''));
+      assert(h[2] === true && r.n === 2 && t[1] === 'เป้าหมาย', JSON.stringify({ h, r, t }));
+    });
+    await step('โหมดนำเสนอ: เริ่มจากหน้า 1 → ลูกศรขวาไปหน้า 2 → กด N แสดงโน้ต → Esc ออก', async () => {
+      await page.click('.page-thumb[data-page="0"]');
+      await page.waitForFunction(() => __lai.cur === 0);
+      await page.click('[data-act="present"]');
+      await page.waitForSelector('.present [data-img][src]', { timeout: 20000 });
+      const n1 = await page.textContent('.present [data-n]');
+      await page.keyboard.press('ArrowRight');
+      await page.waitForFunction(() => document.querySelector('.present [data-n]')?.textContent.startsWith('2'));
+      await page.keyboard.press('n');
+      await wait(300);
+      const notes = await page.$eval('.present [data-notes]', (e) => ({ hidden: e.hidden, text: e.innerText, nextBox: !e.querySelector('.pn-next').hidden }));
+      assert(!notes.nextBox, 'หน้าสุดท้ายยังมีกล่อง "สไลด์ถัดไป" ว่าง ๆ');
+      await page.screenshot({ path: path.join(OUT, 'stage8-present.png') });
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('.present', { state: 'detached' });
+      assert(n1.trim().startsWith('1 /') && !notes.hidden && notes.text.includes('เน้นข้อ 2 เรื่องรถติด'), JSON.stringify({ n1, notes }));
+      return n1.trim();
+    });
+    await step('มุมมองหน้าทั้งหมด (grid) เปิดแล้วปิดได้', async () => {
+      await page.click('[data-act="page-grid"]');
+      await page.waitForSelector('.modal');
+      const n = await page.$$eval('.modal [data-page], .modal .pg-card, .modal button[data-go-page]', (e) => e.length);
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('.modal', { state: 'detached' });
+      return n + ' ภาพย่อ';
+    });
+  }
+
   // ---------------------------------------------------------------- report
   await ev(() => __lai?.saveNow?.()).catch(() => {});
   const fails = results.filter((r) => !r.ok);
