@@ -2473,8 +2473,9 @@ export class Editor {
       const apply = (final) => {
         a.adj = { ...adj };
         const f = [];
-        if (adj.brightness) f.push(new filters.Brightness({ brightness: adj.brightness / 100 }));
-        if (adj.contrast) f.push(new filters.Contrast({ contrast: adj.contrast / 100 }));
+        // slider ±100 → a gentle range like Canva: the raw filters at ±1 wash a photo out to white / black
+        if (adj.brightness) f.push(new filters.Brightness({ brightness: (adj.brightness / 100) * 0.3 }));
+        if (adj.contrast) f.push(new filters.Contrast({ contrast: (adj.contrast / 100) * 0.35 }));
         if (adj.saturation) f.push(new filters.Saturation({ saturation: adj.saturation / 100 }));
         if (adj.hue) f.push(new filters.HueRotation({ rotation: adj.hue / 180 }));
         if (adj.warmth) f.push(warmthMatrix(adj.warmth / 100));

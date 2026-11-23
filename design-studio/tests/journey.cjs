@@ -11,6 +11,8 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
+const { execFileSync } = require('child_process');
+const JSZip = require(path.join(__dirname, '../node_modules/jszip'));
 
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(__dirname, 'report-journey');
@@ -376,6 +378,18 @@ const stage = (n, title) => { group = `${n}. ${title}`; console.log('\n' + group
       await wait(300);
       const r = await ev((i) => { const o = __lai.canvas.getObjects()[i]; return { f: (o.filters || []).length, p: [Math.round(o.left), Math.round(o.top)].join() }; }, i);
       assert(r.f >= 1 && r.p === p0, JSON.stringify(r) + ' was ' + p0);
+      // the adjusted photo must still be a photo, not washed out to white
+      const lum = await ev((i) => {
+        const o = __lai.canvas.getObjects()[i]; __lai.canvas.discardActiveObject(); __lai.canvas.renderAll();
+        o.setCoords(); const b = o.getBoundingRect(); const v = __lai.canvas.viewportTransform, d = window.devicePixelRatio || 1;
+        const ctx = __lai.canvas.lowerCanvasEl.getContext('2d');
+        const x = (b.left * v[0] + v[4]) * d, y = (b.top * v[3] + v[5]) * d, w = b.width * v[0] * d, h = b.height * v[3] * d;
+        const px = ctx.getImageData(x + w * 0.25, y + h * 0.25, Math.max(1, w * 0.5), Math.max(1, h * 0.5)).data;
+        let s = 0, n = 0; for (let k = 0; k < px.length; k += 4) { s += (px[k] + px[k + 1] + px[k + 2]) / 3; n++; }
+        __lai.canvas.setActiveObject(o);
+        return s / n;
+      }, i);
+      assert(lum < 235, 'รูปหลังปรับแสงกลายเป็นสีขาวเกือบทั้งรูป (ความสว่างเฉลี่ย ' + Math.round(lum) + ')');
       await page.keyboard.press('Escape');
     });
     await step('ภาพหน้าจอหลังจัดการรูป', async () => { await ev(() => { __lai.canvas.discardActiveObject(); __lai.canvas.requestRenderAll(); }); await page.screenshot({ path: path.join(OUT, 'stage4-image.png') }); });
@@ -790,6 +804,149 @@ const stage = (n, title) => { group = `${n}. ${title}`; console.log('\n' + group
       await page.keyboard.press('Escape');
       await page.waitForSelector('.modal', { state: 'detached' });
       return n + ' ภาพย่อ';
+    });
+  }
+
+  // ================================================================== 9. export every format and check the files
+  const DL = path.join(OUT, 'downloads');
+  const exportVia = async (fmt, set = async () => {}) => {
+    await page.keyboard.press('Escape');
+    await page.click('[data-act="export"]');
+    await page.click(`.fmt:has(input[value="${fmt}"])`);
+    await set();
+    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 180000 }), page.click('.modal [data-go]')]);
+    // same download names for several formats (e.g. .zip): keep each one
+    const f = path.join(DL, `${fmt}-${Date.now() % 100000}-${dl.suggestedFilename()}`);
+    await dl.saveAs(f);
+    await page.waitForSelector('.modal', { state: 'detached', timeout: 30000 }).catch(() => {});
+    return f;
+  };
+  const norm = (t) => t.normalize('NFC').replace(/[\s​]+/g, '');
+  const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 240000 });
+  /** Every text the person typed, per page (text boxes, texts inside groups and tables; chart labels separately). */
+  const texts = async () => ev(() => __lai.design.pages.map((p) => {
+    const out = [];
+    const walk = (os, inChart) => (os || []).forEach((o) => { if (o.text && o.text.trim() && !inChart) out.push(o.text); walk(o.objects, inChart || o.smart?.type === 'chart'); });
+    walk(JSON.parse(p.json).objects, false);
+    return out;
+  }));
+  const pngSize = (buf) => ({ w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) });
+  if (stage(9, 'ส่งออกทุกแบบ แล้วเปิดไฟล์ตรวจ: ข้อความทุกคำ รูป ฟอนต์ จำนวนหน้า ลิงก์ โน้ต')) {
+    let T;
+    await step('รวบรวมข้อความทั้งหมดที่พิมพ์ไว้ในงาน (2 หน้า)', async () => {
+      await ev(() => __lai.saveNow());
+      T = await texts();
+      assert(T.length === 2 && T[0].length >= 5 && T[1].length >= 8, JSON.stringify(T.map((x) => x.length)));
+      return T.map((x, i) => `หน้า ${i + 1}: ${x.length} ข้อความ`).join(', ');
+    });
+    const missingIn = (hayPerPage) => T.flatMap((list, i) => list.filter((t) => !norm(hayPerPage[i] ?? hayPerPage.join('')).includes(norm(t))).map((t) => `หน้า ${i + 1}: “${t.slice(0, 30)}”`));
+    await step('PNG ทุกหน้า: ได้ไฟล์ zip มี 2 รูป ขนาด 1920×1080', async () => {
+      const f = await exportVia('png');
+      assert(f.endsWith('.zip'), f);
+      const z = await JSZip.loadAsync(fs.readFileSync(f));
+      const pngs = Object.keys(z.files).filter((n) => n.endsWith('.png'));
+      const sizes = await Promise.all(pngs.map(async (n) => pngSize(await z.file(n).async('nodebuffer'))));
+      assert(pngs.length === 2 && sizes.every((x) => x.w === 1920 && x.h === 1080), JSON.stringify({ pngs, sizes }));
+      return pngs.join(', ');
+    });
+    await step('PNG 2× เฉพาะหน้า 2: ไฟล์เดียว 3840×2160', async () => {
+      const f = await exportVia('png', async () => { await page.selectOption('.modal [data-scale]', '2'); await page.selectOption('.modal [data-pages-sel]', { index: 1 }).catch(() => {}); const opts = await page.$$eval('.modal [data-pages-sel] option', (o) => o.map((x) => x.value)); if (opts.includes('custom')) { await page.selectOption('.modal [data-pages-sel]', 'custom'); await page.fill('.modal [data-pages-custom]', '2'); } });
+      const buf = fs.readFileSync(f);
+      assert(f.endsWith('.png') && buf.slice(1, 4).toString() === 'PNG', f);
+      const s = pngSize(buf);
+      assert(s.w === 3840 && s.h === 2160, JSON.stringify(s));
+      return path.basename(f);
+    });
+    await step('JPG และ WEBP: ไฟล์ถูกต้อง (หัวไฟล์ JPEG / RIFF-WEBP)', async () => {
+      const j = await exportVia('jpg'), w = await exportVia('webp');
+      const first = async (f, re) => { if (!f.endsWith('.zip')) return fs.readFileSync(f); const z = await JSZip.loadAsync(fs.readFileSync(f)); const e = z.file(re); assert(e.length === 2, `${path.basename(f)}: ${Object.keys(z.files)}`); return e[0].async('nodebuffer'); };
+      const jb = await first(j, /\.jpe?g$/), wb = await first(w, /\.webp$/);
+      assert(jb[0] === 0xff && jb[1] === 0xd8 && wb.slice(0, 4).toString() === 'RIFF' && wb.slice(8, 12).toString() === 'WEBP', 'bad headers');
+      return `${path.basename(j)}, ${path.basename(w)}`;
+    });
+    await step('PDF: 2 หน้า ขนาดถูก ค้นหา/คัดลอกข้อความไทยได้ครบทุกคำ ฝังฟอนต์ ลิงก์คลิกได้', async () => {
+      const f = await exportVia('pdf');
+      const info = sh('pdfinfo', [f]);
+      const pagesN = +info.match(/Pages:\s+(\d+)/)[1];
+      const per = [1, 2].map((n) => sh('pdftotext', ['-raw', '-f', String(n), '-l', String(n), '-enc', 'UTF-8', f, '-']));
+      const miss = missingIn(per);
+      const fonts = sh('pdffonts', [f]);
+      const raw = fs.readFileSync(f).toString('latin1');
+      assert(pagesN === 2, 'pages ' + pagesN);
+      assert(!miss.length, 'หาไม่เจอใน PDF: ' + miss.slice(0, 5).join(' | '));
+      assert(/\/URI\s*\(https?:\/\/laistudio\.example/.test(raw), 'no link');
+      assert(/yes/.test(fonts), 'fonts not embedded: ' + fonts);
+      return `${pagesN} หน้า, ${T.flat().length} ข้อความครบ, ${(fs.statSync(f).size / 1024).toFixed(0)} KB`;
+    });
+    await step('PowerPoint (.pptx): 2 สไลด์ ข้อความแก้ได้ครบ โน้ตผู้บรรยาย ลิงก์ ตาราง กราฟเป็นของจริง', async () => {
+      const f = await exportVia('pptx');
+      const z = await JSZip.loadAsync(fs.readFileSync(f));
+      const slides = Object.keys(z.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n)).sort();
+      const xml = await Promise.all(slides.map((n) => z.file(n).async('string')));
+      const dec = (x) => x.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+      const txt = xml.map((x) => [...x.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => dec(m[1])).join(''));
+      const miss = missingIn(txt);
+      const notes = await Promise.all(Object.keys(z.files).filter((n) => /notesSlide\d+\.xml$/.test(n) && !z.files[n].dir).map((n) => z.file(n).async('string')));
+      const rels = await Promise.all(Object.keys(z.files).filter((n) => /slides\/_rels\/.+\.rels$/.test(n)).map((n) => z.file(n).async('string')));
+      const charts = Object.keys(z.files).filter((n) => /charts\/chart\d+\.xml$/.test(n)).length;
+      assert(slides.length === 2, 'slides ' + slides.length);
+      assert(!miss.length, 'หาไม่เจอใน PPTX: ' + miss.slice(0, 5).join(' | '));
+      assert(notes.some((n) => dec(n).includes('เน้นข้อ 2 เรื่องรถติด')), 'speaker notes missing');
+      assert(rels.some((r) => r.includes('laistudio.example')), 'link missing');
+      assert(xml.join('').includes('<a:tbl>') && charts >= 1, `table/chart: tbl=${xml.join('').includes('<a:tbl>')} charts=${charts}`);
+      return `${slides.length} สไลด์, กราฟ ${charts}, ${(fs.statSync(f).size / 1024).toFixed(0)} KB`;
+    });
+    await step('PowerPoint เปิดด้วย LibreOffice ได้ และได้ 2 หน้า', async () => {
+      const f = fs.readdirSync(DL).filter((n) => n.endsWith('.pptx')).map((n) => path.join(DL, n))[0];
+      sh('soffice', ['--headless', '--convert-to', 'pdf', '--outdir', path.join(OUT, 'lo'), f]);
+      const pdf = path.join(OUT, 'lo', path.basename(f).replace(/\.pptx$/, '.pdf'));
+      const n = +sh('pdfinfo', [pdf]).match(/Pages:\s+(\d+)/)[1];
+      assert(n === 2, 'pages ' + n);
+    });
+    await step('Word (.docx): ข้อความครบทุกคำ แก้ไขได้ และเปิดด้วย LibreOffice ได้', async () => {
+      const f = await exportVia('docx');
+      const z = await JSZip.loadAsync(fs.readFileSync(f));
+      const x = await z.file('word/document.xml').async('string');
+      const all = [...x.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')).join('');
+      const miss = missingIn([all, all]);
+      assert(!miss.length, 'หาไม่เจอใน DOCX: ' + miss.slice(0, 5).join(' | '));
+      sh('soffice', ['--headless', '--convert-to', 'pdf', '--outdir', path.join(OUT, 'lo'), f]);
+      const n = +sh('pdfinfo', [path.join(OUT, 'lo', path.basename(f).replace(/\.docx$/, '.pdf'))]).match(/Pages:\s+(\d+)/)[1];
+      assert(n >= 2, 'docx pages ' + n);
+      return `${n} หน้าเมื่อเปิดใน LibreOffice`;
+    });
+    await step('SVG: ได้ทุกหน้า มีฟอนต์ฝังในไฟล์ และข้อความไทยเป็นตัวอักษรจริง', async () => {
+      const f = await exportVia('svg');
+      const files = f.endsWith('.zip') ? await Promise.all(Object.values((await JSZip.loadAsync(fs.readFileSync(f))).files).filter((e) => e.name.endsWith('.svg')).map((e) => e.async('string'))) : [fs.readFileSync(f, 'utf8')];
+      const plain = files.map((x) => x.replace(/<[^>]+>/g, ''));
+      const miss = missingIn(plain.map((p) => p.replace(/&amp;/g, '&')));
+      assert(files.length === 2 && files.every((x) => x.includes('@font-face')), `svg ${files.length}`);
+      assert(!miss.length, 'หาไม่เจอใน SVG: ' + miss.slice(0, 4).join(' | '));
+      return `${files.length} ไฟล์`;
+    });
+    await step('ไฟล์โปรเจกต์ (.json): เปิดกลับมาได้ครบ 2 หน้า ชื่อหน้า โน้ต', async () => {
+      const f = await exportVia('json');
+      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+      const d = j.design;
+      assert(j.app === 'lai-studio' && d.pages.length === 2 && d.pages[1].title === 'เป้าหมาย' && d.pages[1].notes.includes('รถติด'), JSON.stringify({ app: j.app, n: d.pages.length }));
+      return `${(fs.statSync(f).size / 1024).toFixed(0)} KB`;
+    });
+    await step('พิมพ์ (ปุ่มเครื่องพิมพ์): เตรียมหน้าพิมพ์ครบ 2 หน้า', async () => {
+      // printing happens in a hidden frame: catch its print() and look at the pages it holds
+      await page.evaluate(() => {
+        window.__print = null;
+        const add = Node.prototype.appendChild;
+        Node.prototype.appendChild = function (el) {
+          const r = add.call(this, el);
+          if (el.tagName === 'IFRAME') el.contentWindow.print = () => { const imgs = [...el.contentDocument.images]; window.__print = { n: imgs.length, ok: imgs.every((i) => i.complete && i.naturalWidth > 0) }; };
+          return r;
+        };
+      });
+      await page.click('[data-act="print"]');
+      await page.waitForFunction(() => window.__print, null, { timeout: 60000 });
+      const r = await page.evaluate(() => window.__print);
+      assert(r.n === 2 && r.ok, JSON.stringify(r));
+      return `${r.n} หน้าในหน้าพิมพ์`;
     });
   }
 
