@@ -129,7 +129,9 @@ export function searchMatch(txt, q) {
 export function elementsSearchHTML(gfx, q) {
   const hit = (txt) => searchMatch(txt, q);
   const shapes = SHAPE_FAMILIES.flatMap((f) => f.items.map((it, i) => ({ f, i, txt: `${f.title} ${it.label} รูปทรง`.toLowerCase() }))).filter((x) => hit(x.txt));
-  const g = (gfx || []).flatMap((c) => c.items.map((it) => ({ c, it, txt: `${c.title} ${it[0].replace(/-/g, ' ')} ${it[4] || ''}`.toLowerCase() }))).filter((x) => hit(x.txt));
+  const g = (gfx || []).flatMap((c) => c.items.map((it) => ({ c, it, txt: `${c.title} ${it[0].replace(/-/g, ' ')} ${it[4] || ''}`.toLowerCase() }))).filter((x) => hit(x.txt))
+    // closest match first: "หัวใจ" → heart before building-heart (fewer words in the name = more exact), stable otherwise
+    .map((x, i) => ({ ...x, i, w: x.it[0].split('-').length })).sort((a, b) => a.w - b.w || a.i - b.i);
   const frs = FRAME_SHAPES.filter((x) => hit(`รูปทรง ${x.label}`.toLowerCase()));
   const il = ILL.filter((x) => hit(`ภาพประกอบ ${x.catTh} ${x.th} ${x.keywords || ''}`.toLowerCase()));
   const n = shapes.length + g.length + il.length + frs.length;

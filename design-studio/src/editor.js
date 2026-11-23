@@ -252,7 +252,13 @@ export class Editor {
   // ---------------------------------------------------------------- canvas events
   bindCanvas() {
     const c = this.canvas;
-    const sel = () => { this.renderCtx(); if (this.panel === 'layers') this.renderPanel(); };
+    const sel = () => {
+      // a straight line has no height: its top/bottom/corner handles would sit on the line itself, so pressing the
+      // middle of the line to move it stretched it into a thick bar. Like Canva: only the two end handles (+ rotate).
+      const a = c.getActiveObject();
+      if (a && a.type === 'line') a.setControlsVisibility({ mt: false, mb: false, tl: false, tr: false, bl: false, br: false });
+      this.renderCtx(); if (this.panel === 'layers') this.renderPanel();
+    };
     c.on('selection:created', () => { closePopover(); if (this._style) this.maybePasteStyle(); sel(); });
     c.on('selection:updated', () => { if (this.cropLeft()) return; closePopover(); if (this._style) this.maybePasteStyle(); sel(); });
     c.on('selection:cleared', () => { if (this.cropLeft()) return; if (currentPopoverId() !== 'color-bg') closePopover(); sel(); });
@@ -1897,6 +1903,8 @@ export class Editor {
     if (a.smart) return 'smart';
     if (isImage(a)) return 'image';
     if (a.shapeText) return 'shapeText';
+    // a single-colour graphic (icon / decoration), whether drawn as one path or several: one colour for all of it
+    if (a.graphic && a.graphic.mono) return 'graphic';
     if (a.type === 'group') return 'group';
     if (isLineLike(a)) return 'line';
     return 'shape';
@@ -1980,6 +1988,11 @@ export class Editor {
         ${ph && !ph.placeholder ? btn('deco-adjust', 'crop', 'ปรับรูปในกรอบ: ลากเลือกส่วนที่แสดง ย่อ/ขยาย (ดับเบิลคลิกก็ได้)', false, 'ปรับรูปในกรอบ') : ''}
         ${btn('replace-img', 'replace', 'ใส่/แทนที่รูป (หรือลากรูปมาวางบนกรอบ)', false, ph && !ph.placeholder ? 'แทนที่รูป' : 'ใส่รูป')}
         ${btn('ungroup', 'ungroup', 'แยกส่วนประกอบของกรอบ', false, 'แยก')}${common()}`;
+    } else if (kind === 'graphic') {
+      html = `${sw('graphic', a.graphic.color, 'สีกราฟิก')}<span class="ctx-label">สีกราฟิก</span>
+        ${a.type === 'group' ? btn('ungroup', 'ungroup', 'แยกส่วนประกอบ', false, 'แยก') : ''}
+        ${btn('flip:flipX', 'flipH', 'พลิกแนวนอน')}${btn('flip:flipY', 'flipV', 'พลิกแนวตั้ง')}
+        ${btn('pop:effects', 'effects', 'เงา', false, 'เอฟเฟกต์')}${common()}`;
     } else if (kind === 'group') {
       html = `${a.graphic && a.graphic.mono ? sw('graphic', a.graphic.color, 'สีกราฟิก') : ''}${btn('ungroup', 'ungroup', 'ยกเลิกกลุ่ม (Ctrl+Shift+G)', false, 'ยกเลิกกลุ่ม')}
         ${btn('flip:flipX', 'flipH', 'พลิกแนวนอน')}${btn('flip:flipY', 'flipV', 'พลิกแนวตั้ง')}${common()}`;

@@ -133,7 +133,9 @@ add({ k: 'kameleon', title: 'ภาพประกอบวงกลม', kind: 
     'ไอคอนทั่วไป': /^(heart|star|check|x$|plus|minus|alert|info|help|search|settings|lock|key|shield|bell|gift|shopping|cart|truck|coin|cash|credit|wallet|discount|tag|camera|photo|video|music|microphone|headphones|wifi|device|leaf|plant|sun|moon|cloud|droplet|flame|snowflake|bike|car|bus|plane|ship|coffee|pizza|cake|tools|hammer|paint|palette|brush|sparkles|confetti|balloon|thumb|mood|hand|paw|dog|cat|fish|tree|flower)/,
   };
   for (const [title, re] of Object.entries(groups)) {
-    const names = T.filter((n) => re.test(n)).slice(0, 140);
+    // basic icons first (heart, star, phone …) then variants (bell-heart …), mixed by first word, 140 per group
+    const all = T.filter((n) => re.test(n));
+    const names = [...all.filter((n) => !n.includes('-')), ...roundRobin(all.filter((n) => n.includes('-')))].slice(0, 140);
     add({ k: 'tabler-' + Object.keys(groups).indexOf(title), title, kind: 'mono', mode: 'stroke', license: 'MIT', credit: 'Tabler Icons (MIT)' }, 'tabler', names);
   }
 }

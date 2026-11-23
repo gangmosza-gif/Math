@@ -462,6 +462,121 @@ const stage = (n, title) => { group = `${n}. ${title}`; console.log('\n' + group
     await step('ภาพหน้าจอหลังจัดกลุ่ม', async () => { await ev(() => { __lai.canvas.discardActiveObject(); __lai.canvas.requestRenderAll(); }); await page.screenshot({ path: path.join(OUT, 'stage5-groups.png') }); });
   }
 
+  // ================================================================== 6. elements
+  const last = () => ev(() => { const o = __lai.canvas.getObjects().at(-1); return { type: o.type, smart: o.smart?.type, chart: o.smart?.chart, graphic: o.graphic?.n }; });
+  const placeLast = async (x, y) => { // drag the newest object to a spot (design units) with the mouse
+    const i = (await objs()).length - 1; const c = await centerOf(i); const t = await screenOf(x, y);
+    await page.mouse.move(c.x, c.y); await page.mouse.down(); await page.mouse.move(t.x, t.y, { steps: 10 }); await page.mouse.up(); await wait(150);
+  };
+  if (stage(6, 'องค์ประกอบ: รูปทรง เส้น ไอคอน กราฟิก ตาราง กราฟ QR สมการ (ใส่ แก้ข้อมูล เปลี่ยนสี)')) {
+    await step('เปิดแผงองค์ประกอบ ใส่สี่เหลี่ยม ลากไปวาง เปลี่ยนสีพื้น ขอบ และมุมมน', async () => {
+      await page.keyboard.press('Escape');
+      await openPanel('elements');
+      await page.click('[data-act="shape:0"]');
+      await page.waitForFunction(() => __lai.canvas.getActiveObject()?.type === 'rect');
+      await placeLast(260, 860);
+      await page.click('[data-ctx] [data-act="color:fill"]');
+      const inp = await page.waitForSelector('.color-pop [data-hex]');
+      await inp.fill('#22C55E'); await inp.press('Enter'); await page.keyboard.press('Escape');
+      for (const k of ['strokeWidth', 'rx']) { const r = await page.$(`[data-ctx] [data-range="${k}"]`); const b = await r.boundingBox(); await page.mouse.click(b.x + b.width * 0.4, b.y + b.height / 2); }
+      const r = await ev(() => { const o = __lai.canvas.getActiveObject(); return { fill: o.fill, sw: o.strokeWidth, rx: o.rx }; });
+      assert(String(r.fill).toLowerCase() === '#22c55e' && r.sw > 0 && r.rx > 0, JSON.stringify(r));
+    });
+    await step('ใส่เส้น แล้วเปลี่ยนเป็นเส้นประ', async () => {
+      await page.click('[data-act="line:0"]');
+      await wait(200);
+      await placeLast(700, 980);
+      const sc = await ev(() => { const o = __lai.canvas.getActiveObject(); return [o.scaleX, o.scaleY]; });
+      assert(sc[1] === 1, 'กดกลางเส้นเพื่อย้าย แต่เส้นถูกยืดเป็นแถบหนา: scaleY ' + sc[1]);
+      await page.selectOption('[data-ctx] [data-select="dash"]', 'dash');
+      const d = await ev(() => __lai.canvas.getActiveObject().strokeDashArray);
+      assert(Array.isArray(d) && d.length === 2, JSON.stringify(d));
+    });
+    await step('ค้นหาองค์ประกอบ "หัวใจ" แล้วคลิกผลแรก → เปลี่ยนสีกราฟิก', async () => {
+      await page.fill('[data-el-search]', 'หัวใจ'); await wait(400);
+      const first = await page.$$eval('[data-panel-body] .el', (b) => b.filter((x) => !x.hidden && !x.closest('[hidden]') && /gfx:g\|tabler/.test(x.dataset.act)).map((x) => x.dataset.act)[0]);
+      assert(first, 'no mono heart icon in results');
+      await page.fill('[data-el-search]', ''); await page.fill('[data-el-search]', 'หัวใจ'); await wait(300);
+      const n0 = (await objs()).length;
+      await page.click(`[data-act="${first}"]`);
+      await page.waitForFunction((n) => __lai.canvas.getObjects().length === n + 1, n0);
+      await placeLast(1100, 860);
+      await page.fill('[data-el-search]', '');
+      await page.click('[data-ctx] [data-act="color:graphic"]');
+      const inp = await page.waitForSelector('.color-pop [data-hex]');
+      await inp.fill('#E11D48'); await inp.press('Enter'); await page.keyboard.press('Escape');
+      const c = await ev(() => __lai.canvas.getActiveObject().graphic.color);
+      await page.fill('[data-el-search]', '');
+      assert(String(c).toLowerCase() === '#e11d48', c);
+      assert(/\|heart$/.test(first), 'ผลแรกไม่ใช่หัวใจ: ' + first);
+      return first.replace('gfx:', '');
+    });
+    await step('ตาราง: ใส่ → ดับเบิลคลิก → พิมพ์หัวตารางไทย + เพิ่มแถว → ใช้การเปลี่ยนแปลง: ข้อความไทยในตารางครบ', async () => {
+      await page.click('[data-act="smart:table"]');
+      await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.type === 'table');
+      await placeLast(1500, 760);
+      const c = await centerOf((await objs()).length - 1);
+      await page.mouse.dblclick(c.x, c.y);
+      await page.waitForSelector('.modal [data-cell="0,0"]');
+      const words = ['ชื่อนักเรียน', 'คะแนนสอบ', 'ผลการประเมิน'];
+      for (let i = 0; i < 3; i++) { const cell = await page.$(`.modal [data-cell="0,${i}"]`); if (!cell) break; await cell.fill(''); await cell.type(words[i], { delay: 10 }); }
+      await page.click('.modal [data-t="row+"]');
+      const rows = await page.$$eval('.modal tr', (e) => e.length);
+      const nc = await page.$$eval('.modal tr:last-child [data-cell]', (e) => e.length);
+      await page.fill(`.modal [data-cell="${rows - 1},0"]`, 'ด.ญ.สมศรี ใจดี');
+      await page.click('.modal [data-go]');
+      await page.waitForSelector('.modal', { state: 'detached' });
+      const r = await ev(() => { const o = __lai.canvas.getObjects().at(-1); return { rows: o.smart.rows.length, head: o.smart.rows[0], last: o.smart.rows.at(-1)[0], texts: o.getObjects().filter((x) => x.text).map((x) => x.text) }; });
+      assert(r.rows === rows && words.slice(0, nc).every((w) => r.texts.includes(w)) && r.texts.includes('ด.ญ.สมศรี ใจดี'), JSON.stringify(r).slice(0, 300));
+      const bad = await ev(() => { const o = __lai.canvas.getObjects().at(-1); return o.getObjects().filter((x) => x.text && x._textLines.some((l) => l.length === 1 && x.text.length > 3)).map((x) => x.text); });
+      assert(!bad.length, 'ข้อความในช่องตารางถูกตัดเหลือบรรทัดละตัว: ' + bad);
+      return `${r.rows} แถว`;
+    });
+    await step('กราฟแท่ง: ใส่ → แก้ป้ายและตัวเลข → กราฟเปลี่ยนตาม', async () => {
+      await page.click('[data-act="smart:bar"]');
+      await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.chart === 'bar');
+      await placeLast(420, 300);
+      await page.click('[data-ctx] [data-act="smart-edit"]');
+      await page.waitForSelector('.modal [data-l="0"]');
+      await page.fill('.modal [data-l="0"]', 'มกราคม');
+      await page.fill('.modal [data-v="0:0"]', '87');
+      await page.click('.modal [data-go]');
+      await page.waitForSelector('.modal', { state: 'detached' });
+      const r = await ev(() => { const o = __lai.canvas.getObjects().at(-1); return { labels: o.smart.labels || o.smart.rows?.map((x) => x[0]), texts: o.getObjects().filter((x) => x.text).map((x) => x.text) }; });
+      assert(r.texts.some((t) => t.includes('มกราคม')) && r.texts.some((t) => t.includes('87')), JSON.stringify(r).slice(0, 300));
+    });
+    await step('QR Code: ใส่ → ตั้งลิงก์ใหม่ → คิวอาร์เปลี่ยน', async () => {
+      await page.click('[data-act="smart:qr"]');
+      await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.type === 'qr');
+      await placeLast(1700, 200);
+      const before = await ev(() => JSON.stringify(__lai.canvas.getActiveObject().toObject().objects?.length || __lai.canvas.getActiveObject().getSrc?.()?.length));
+      await page.click('[data-ctx] [data-act="smart-edit"]');
+      await page.fill('.modal [data-text]', 'https://laistudio.example/ห้องเรียน-ป2');
+      await page.click('.modal [data-go]');
+      await page.waitForSelector('.modal', { state: 'detached' });
+      const r = await ev(() => __lai.canvas.getObjects().at(-1).smart.text);
+      assert(r === 'https://laistudio.example/ห้องเรียน-ป2', r);
+      return before;
+    });
+    await step('สมการ: ใส่ → พิมพ์ LaTeX สูตรพื้นที่วงกลม → แสดงผล', async () => {
+      await page.click('[data-act="smart:equation"]');
+      await page.waitForFunction(() => __lai.canvas.getActiveObject()?.smart?.type === 'equation');
+      await placeLast(1100, 450);
+      await page.click('[data-ctx] [data-act="smart-edit"]');
+      await page.fill('.modal [data-latex]', 'A = \\pi r^2');
+      await page.click('.modal [data-go]');
+      await page.waitForSelector('.modal', { state: 'detached' });
+      const r = await ev(() => { const o = __lai.canvas.getObjects().at(-1); return { latex: o.smart.latex, w: o.getScaledWidth(), h: o.getScaledHeight() }; });
+      assert(r.latex === 'A = \\pi r^2' && r.w > 20 && r.h > 10, JSON.stringify(r));
+    });
+    await step('ทุกชิ้นที่ใส่อยู่ในหน้า และไม่มีข้อผิดพลาด', async () => {
+      const out = await ev(() => __lai.canvas.getObjects().filter((o) => { o.setCoords(); const b = o.getBoundingRect(); return b.left + b.width < 0 || b.top + b.height < 0 || b.left > 1920 || b.top > 1080; }).map((o) => o.type));
+      assert(!out.length && !errors.length, JSON.stringify({ out, errors }));
+      return (await objs()).length + ' ชิ้นบนหน้า';
+    });
+    await step('ภาพหน้าจอหลังใส่องค์ประกอบ', async () => { await ev(() => { __lai.canvas.discardActiveObject(); __lai.canvas.requestRenderAll(); }); await page.screenshot({ path: path.join(OUT, 'stage6-elements.png') }); });
+  }
+
   // ---------------------------------------------------------------- report
   await ev(() => __lai?.saveNow?.()).catch(() => {});
   const fails = results.filter((r) => !r.ok);
