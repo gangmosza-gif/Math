@@ -2,7 +2,9 @@ import './style.css';
 import './thaiwrap.js';
 import { cssUrlForSlug } from './fonts.js';
 // the interface font (index.html links fonts/…; the single-file build carries its own packed copy)
-if (!document.querySelector('link[href$="ui-ibm-plex-sans-thai.css"]')?.sheet?.cssRules?.length) {
+// (a page opened straight from disk — file:// — may not read its own stylesheet's rules: treat that as "not loaded")
+const uiFontLoaded = () => { try { return !!document.querySelector('link[href$="ui-ibm-plex-sans-thai.css"]')?.sheet?.cssRules?.length; } catch { return false; } };
+if (!uiFontLoaded()) {
   const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = cssUrlForSlug('ui-ibm-plex-sans-thai'); document.head.appendChild(l);
 } // Thai word wrapping for every textbox (must load before any text is built)
 import { Editor, BLANK_PAGE } from './editor.js';

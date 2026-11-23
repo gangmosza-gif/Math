@@ -9,7 +9,8 @@ let gfxPromise = null;
 let illPromise = null;
 const ILL_BASE = 'illustrations/';
 /** Our own illustrations (made with ChatGPT, checked and approved): public/illustrations/manifest.json. Empty when absent. */
-export const loadIllustrations = () => (illPromise ||= fetch(ILL_BASE + 'manifest.json').then((r) => (r.ok ? r.json() : { items: [] })).then((m) => m.items || []).catch(() => []));
+// opened straight from a folder (file://) the browser cannot read files next to the page: no library to load
+export const loadIllustrations = () => (illPromise ||= (location.protocol === 'file:' ? Promise.reject(new Error('file')) : fetch(ILL_BASE + 'manifest.json')).then((r) => (r.ok ? r.json() : { items: [] })).then((m) => m.items || []).catch(() => []));
 export const illURL = (it, thumb = false) => ILL_BASE + (thumb ? it.thumb : it.src);
 let ILL = [];
 export const setIllustrations = (items) => { ILL = items || []; };

@@ -6,6 +6,7 @@ import { GENERATED_TEMPLATES } from './templates2.js';
 // pro presentation slides built with the app's own tools (tools/build_pro_templates.cjs):
 // the index is small; the pages (protemplates.json) load the first time one is needed
 import PRO_INDEX from './protemplates-index.json';
+import { libraryPhotoSrc } from './photos.js';
 
 export const PRO_CATEGORY = 'พรีเซนต์มืออาชีพ';
 
@@ -279,6 +280,7 @@ function buildPageTemplate(tpl, W, H) {
     c.top = (o.top || 0) * s + dy;
     c.scaleX = (o.scaleX ?? 1) * s;
     c.scaleY = (o.scaleY ?? 1) * s;
+    if (c.src) c.src = libraryPhotoSrc(c.src); // the library photo, wherever this build keeps it
     return { toObject: () => structuredClone(c) };
   });
   return { objects, background: structuredClone(tpl.page.background) };
