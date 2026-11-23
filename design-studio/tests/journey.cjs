@@ -950,6 +950,82 @@ const stage = (n, title) => { group = `${n}. ${title}`; console.log('\n' + group
     });
   }
 
+  // ================================================================== 10. home: saved work, reopen, manage
+  if (stage(10, 'กลับหน้าแรก: งานถูกบันทึก เปิดซ้ำได้เหมือนเดิม เปลี่ยนชื่อ ติดดาว ทำสำเนา ลบ นำเข้าไฟล์โปรเจกต์')) {
+    let before, id;
+    await step('กดปุ่มบ้าน: กลับหน้าแรก เห็นงานพร้อมภาพย่อ "2 หน้า"', async () => {
+      before = await ev(() => { __lai.canvas.discardActiveObject(); return { id: __lai.design.id, pages: __lai.design.pages.map((p) => p.json) }; });
+      id = before.id;
+      await page.click('[data-act="home"]');
+      await page.waitForSelector(`.design-card [data-open="${id}"]`, { timeout: 15000 });
+      const meta = await page.$eval(`.design-card:has([data-open="${id}"]) small`, (e) => e.textContent);
+      const thumb = await page.$eval(`[data-open="${id}"] img`, (e) => e.complete && e.naturalWidth > 0).catch(() => false);
+      assert(/2 หน้า/.test(meta) && thumb, meta + ' thumb ' + thumb);
+      return meta;
+    });
+    await step('รีเฟรชหน้าเว็บ (F5) แล้วงานยังอยู่ — เปิดงานกลับมา ข้อมูลทุกหน้าเหมือนเดิมทุกชิ้น', async () => {
+      await page.reload();
+      await page.click(`[data-open="${id}"]`);
+      await page.waitForFunction(() => window.__lai && __lai.canvas && __lai.canvas.getObjects().length > 0, null, { timeout: 20000 });
+      await wait(800);
+      const now = await ev(() => __lai.design.pages.map((p) => p.json));
+      const objsOf = (j) => JSON.parse(j).objects.map((o) => [o.type, Math.round(o.left), Math.round(o.top), o.text || '', (o.objects || []).length].join(','));
+      const same = now.length === 2 && now.every((j, i) => JSON.stringify(objsOf(j)) === JSON.stringify(objsOf(before.pages[i])));
+      assert(same, 'design changed after reload');
+      const t = await ev(() => __lai.canvas.getObjects().filter((o) => o.text).map((o) => o.text));
+      assert(t.some((x) => x.startsWith('การศึกษาไทยในยุคดิจิทัล')), 'texts ' + t.slice(0, 3));
+      return `${now.length} หน้า ${JSON.parse(now[0]).objects.length}+${JSON.parse(now[1]).objects.length} ชิ้น ครบ`;
+    });
+    await step('เปลี่ยนชื่องานในหน้าแก้ไข (คลิกชื่อด้านบน) เป็นภาษาไทย', async () => {
+      const nameEl = await page.$('.name-input[data-name]');
+      assert(nameEl, 'no name box in the top bar');
+      await nameEl.click({ clickCount: 3 });
+      await page.keyboard.type('สื่อการสอน ป.2 ภาคเรียนที่ 1', { delay: 10 });
+      await page.keyboard.press('Enter');
+      await wait(200);
+      await ev(() => __lai.saveNow());
+      await page.click('[data-act="home"]');
+      await page.waitForSelector(`.design-card [data-open="${id}"]`);
+      const n = await page.$eval(`.design-card:has([data-open="${id}"]) b`, (e) => e.textContent);
+      assert(n === 'สื่อการสอน ป.2 ภาคเรียนที่ 1', n);
+      return 'พิมพ์ในช่องชื่อบนแถบด้านบน';
+    });
+    await step('ติดดาว แล้วกรอง "ติดดาว" เห็นงานนี้', async () => {
+      await page.click(`[data-star="${id}"]`);
+      await wait(300);
+      await page.click('[data-filter="star"]');
+      const vis = await page.$$eval('.design-card', (e) => e.filter((x) => !x.hidden).map((x) => x.dataset.name));
+      await page.click('[data-filter="all"]');
+      assert(vis.length === 1 && vis[0].includes('สื่อการสอน'), JSON.stringify(vis));
+    });
+    await step('ทำสำเนางานจากเมนู ⋯ แล้วลบสำเนาทิ้ง (ยืนยัน): เหลืองานเดิมงานเดียว', async () => {
+      const count = () => page.$$eval('.design-card', (e) => e.length);
+      const n0 = await count();
+      await page.click(`[data-menu="${id}"]`); await page.click('.popover [data-m="dup"]');
+      await page.waitForFunction((n) => document.querySelectorAll('.design-card').length === n + 1, n0);
+      const copy = await page.$$eval('[data-open]', (e, id) => e.map((x) => x.dataset.open).find((x) => x !== id), id);
+      await page.click(`[data-menu="${copy}"]`); await page.click('.popover [data-m="del"]');
+      await page.click('.modal [data-yes]');
+      await page.waitForFunction((n) => document.querySelectorAll('.design-card').length === n, n0);
+      assert(await page.$(`[data-open="${id}"]`), 'original gone');
+    });
+    await step('นำเข้าไฟล์โปรเจกต์ (.json) ที่ส่งออกไว้: ได้งานใหม่ 2 หน้า เปิดแล้วข้อความครบ', async () => {
+      const f = fs.readdirSync(DL).filter((n) => n.endsWith('.lai.json')).map((n) => path.join(DL, n))[0];
+      const n0 = await page.$$eval('.design-card', (e) => e.length);
+      await page.setInputFiles('[data-file]', f);
+      await page.waitForFunction(() => window.__lai && __lai.canvas && __lai.canvas.getObjects().length > 0, null, { timeout: 20000 }).catch(() => {});
+      await wait(800);
+      const inEditor = await ev(() => !!(window.__lai && __lai.canvas && document.querySelector('.canvas-container')));
+      let pagesN;
+      if (inEditor) pagesN = await ev(() => __lai.design.pages.length);
+      else { await page.waitForFunction((n) => document.querySelectorAll('.design-card').length === n + 1, n0); pagesN = 2; }
+      const texts = inEditor ? await ev(() => __lai.canvas.getObjects().filter((o) => o.text).map((o) => o.text)) : [];
+      assert(pagesN === 2 && (!inEditor || texts.some((x) => x.startsWith('การศึกษาไทย'))), JSON.stringify({ inEditor, pagesN, t: texts.slice(0, 2) }));
+      return inEditor ? 'เปิดงานที่นำเข้าให้ทันที' : 'เพิ่มในรายการงาน';
+    });
+    await step('ไม่มีข้อผิดพลาดในหน้าเว็บตลอดการใช้งานทั้งหมด', async () => { assert(!errors.length, errors.slice(0, 3).join(' | ')); });
+  }
+
   // ---------------------------------------------------------------- report
   await ev(() => __lai?.saveNow?.()).catch(() => {});
   const fails = results.filter((r) => !r.ok);
