@@ -2325,8 +2325,8 @@ export class Editor {
         ${a.type === 'activeselection' ? `<div class="cp-title">เว้นระยะเท่ากัน</div><div class="grid2"><button class="btn sm" data-a="distribute:h">↔ แนวนอน</button><button class="btn sm" data-a="distribute:v">↕ แนวตั้ง</button></div>` : ''}
         <div class="cp-title">ขนาดและตำแหน่ง (px)</div>
         <div class="grid2 fields">
-          <label>กว้าง <input class="input" type="number" data-f="w" value="${round(b.width)}"></label>
-          <label>สูง <input class="input" type="number" data-f="h" value="${round(b.height)}"></label>
+          <label>กว้าง <input class="input" type="number" data-f="w" value="${round(a.getScaledWidth())}"></label>
+          <label>สูง <input class="input" type="number" data-f="h" value="${round(a.getScaledHeight())}"></label>
           <label>X <input class="input" type="number" data-f="x" value="${round(b.left)}"></label>
           <label>Y <input class="input" type="number" data-f="y" value="${round(b.top)}"></label>
           <label>หมุน° <input class="input" type="number" data-f="angle" value="${round(a.angle || 0)}"></label>
@@ -2350,8 +2350,9 @@ export class Editor {
       if (f === 'x') o.set('left', o.left + (v - bb.left));
       if (f === 'y') o.set('top', o.top + (v - bb.top));
       if (f === 'angle') o.rotate(v);
-      if (f === 'w' && v > 0) { const k = v / bb.width; if (isText(o)) { o.set('width', o.width * k); } else o.set('scaleX', o.scaleX * k); }
-      if (f === 'h' && v > 0) { const k = v / bb.height; if (isText(o)) o.set('fontSize', o.fontSize * k); else o.set('scaleY', o.scaleY * k); }
+      // width / height are the object's own size (like Canva), not the box around it when it is rotated
+      if (f === 'w' && v > 0) { const k = v / o.getScaledWidth(); if (isText(o)) { o.set('width', o.width * k); } else o.set('scaleX', o.scaleX * k); }
+      if (f === 'h' && v > 0) { const k = v / o.getScaledHeight(); if (isText(o)) o.set('fontSize', o.fontSize * k); else o.set('scaleY', o.scaleY * k); }
       if (isText(o)) o.initDimensions();
       o.setCoords();
       this.canvas.requestRenderAll();

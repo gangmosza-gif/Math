@@ -577,6 +577,127 @@ const stage = (n, title) => { group = `${n}. ${title}`; console.log('\n' + group
     await step('ภาพหน้าจอหลังใส่องค์ประกอบ', async () => { await ev(() => { __lai.canvas.discardActiveObject(); __lai.canvas.requestRenderAll(); }); await page.screenshot({ path: path.join(OUT, 'stage6-elements.png') }); });
   }
 
+  // ================================================================== 7. background, drawing, layers, position
+  const idxOf = (pred) => ev((src) => __lai.canvas.getObjects().findIndex(new Function('o', 'return ' + src)), pred);
+  if (stage(7, 'พื้นหลัง วาดอิสระ เลเยอร์ ลำดับชั้น จัดแนว ขนาดตำแหน่ง ล็อก โปร่งใส ลิงก์')) {
+    await step('ก่อนเริ่ม: หัวเรื่อง เนื้อความ และรูปยังอยู่ครบ และอยู่ในหน้า', async () => {
+      const r = await ev(() => __lai.canvas.getObjects().filter((o) => o.type === 'textbox' || o.type === 'image').map((o) => { o.setCoords(); const b = o.getBoundingRect(); return { t: o.type, in: b.left < 1920 && b.top < 1080 && b.left + b.width > 0 && b.top + b.height > 0, vis: o.visible, op: o.opacity }; }));
+      assert(r.filter((x) => x.t === 'textbox').length >= 2 && r.some((x) => x.t === 'image') && r.every((x) => x.in && x.vis && x.op > 0), JSON.stringify(r));
+    });
+    await step('พื้นหลัง: เลือกสีจากแผง แล้วเปลี่ยนเป็นไล่สี', async () => {
+      await page.keyboard.press('Escape');
+      await openPanel('background');
+      const c = await page.$$eval('[data-act^="bg:"]', (e) => e[3].dataset.act.slice(3));
+      await page.click(`[data-act="bg:${c}"]`);
+      const b1 = await ev(() => __lai.canvas.backgroundColor);
+      await page.click('[data-act="bggrad:2"]');
+      const b2 = await ev(() => typeof __lai.canvas.backgroundColor === 'object' && __lai.canvas.backgroundColor.colorStops?.length);
+      assert(String(b1).toLowerCase() === c.toLowerCase() && b2 >= 2, JSON.stringify({ c, b1, b2 }));
+      await page.click('[data-act="bg:#ffffff"]').catch(async () => { await ev(() => __lai.setBackground('#ffffff')); });
+    });
+    await step('วาดอิสระ: ปากกา ลากเส้นซิกแซก 1 เส้น และไฮไลต์ 1 เส้น แล้วกดเสร็จ', async () => {
+      await openPanel('draw');
+      await page.click('[data-act="draw-mode:pen"]');
+      const n0 = (await objs()).length;
+      const line = async (pts) => { const a = await screenOf(...pts[0]); await page.mouse.move(a.x, a.y); await page.mouse.down(); for (const p of pts.slice(1)) { const q = await screenOf(...p); await page.mouse.move(q.x, q.y, { steps: 6 }); } await page.mouse.up(); await wait(200); };
+      await line([[200, 120], [300, 200], [400, 120], [500, 200]]);
+      await page.click('[data-act="draw-mode:highlighter"]');
+      await line([[200, 260], [600, 260]]);
+      await page.click('[data-act="draw-stop"]').catch(() => page.keyboard.press('Escape'));
+      await wait(200);
+      const r = await ev((n0) => ({ n: __lai.canvas.getObjects().length - n0, types: __lai.canvas.getObjects().slice(n0).map((o) => o.type), drawing: __lai.canvas.isDrawingMode }), n0);
+      assert(r.n === 2 && r.types.every((t) => t === 'path') && !r.drawing, JSON.stringify(r));
+    });
+    await step('แผงเลเยอร์: แสดงทุกชิ้น เลื่อนรูปสี่เหลี่ยมขึ้นบนสุด ซ่อน/แสดง และล็อกจากแผง', async () => {
+      await openPanel('layers');
+      const n = (await objs()).length;
+      const rows = await page.$$eval('[data-act^="layer-sel:"]', (e) => e.length);
+      assert(rows === n, `layers ${rows} vs objects ${n}`);
+      const ri = await idxOf("o.type === 'rect' && !o.smart");
+      for (let k = ri; k < n - 1; k++) { await page.click(`[data-act="layer-up:${k}"]`); await wait(80); }
+      const top = await ev(() => __lai.canvas.getObjects().at(-1).type);
+      await page.click(`[data-act="layer-vis:${n - 1}"]`);
+      const hidden = await ev(() => __lai.canvas.getObjects().at(-1).visible);
+      await page.click(`[data-act="layer-vis:${n - 1}"]`);
+      await page.click(`[data-act="layer-lock:${n - 1}"]`);
+      const locked = await ev(() => !!__lai.canvas.getObjects().at(-1).locked);
+      await page.click(`[data-act="layer-lock:${n - 1}"]`);
+      const after = await ev(() => ({ v: __lai.canvas.getObjects().at(-1).visible, l: !!__lai.canvas.getObjects().at(-1).locked }));
+      assert(top === 'rect' && hidden === false && locked && after.v && !after.l, JSON.stringify({ top, hidden, locked, after }));
+    });
+    await step('ตำแหน่ง: เลือกสี่เหลี่ยม → ล่างสุด / จัดกึ่งกลางหน้า / พิมพ์ขนาดและมุมหมุน', async () => {
+      await page.keyboard.press('Escape');
+      const ri = await idxOf("o.type === 'rect' && !o.smart");
+      await selectAt(ri);
+      await page.click('[data-ctx] [data-act="pop:position"]');
+      await page.click('.popover [data-a="arrange:back"]');
+      const back = await idxOf("o.type === 'rect' && !o.smart");
+      await page.click('.popover [data-a="align:center"]'); await page.click('.popover [data-a="align:middle"]');
+      const c = await ev(() => { const o = __lai.canvas.getActiveObject(); const p = o.getCenterPoint(); return [Math.round(p.x), Math.round(p.y)]; });
+      for (const [f, v] of [['angle', '15'], ['w', '400']]) { /* width typed after rotating: still the object's own width */ await page.fill(`.popover [data-f="${f}"]`, v); await page.press(`.popover [data-f="${f}"]`, 'Enter'); await wait(150); }
+      const r = await ev(() => { const o = __lai.canvas.getActiveObject(); return { ang: Math.round(o.angle), w: Math.round(o.getScaledWidth()) }; });
+      await page.keyboard.press('Escape');
+      assert(back === 0 && Math.abs(c[0] - 960) <= 2 && Math.abs(c[1] - 540) <= 2 && r.ang === 15 && Math.abs(r.w - 400) <= 3, JSON.stringify({ back, c, r }));
+    });
+    await step('ความโปร่งใส 50% และใส่ลิงก์ให้สี่เหลี่ยม', async () => {
+      await page.click('[data-ctx] [data-act="pop:opacity"]');
+      const r = await page.$('.popover [data-r]'); const b = await r.boundingBox();
+      await page.mouse.click(b.x + b.width * 0.5, b.y + b.height / 2);
+      await page.keyboard.press('Escape');
+      await page.click('[data-ctx] [data-act="pop:link"]');
+      await page.fill('.popover [data-url]', 'laistudio.example/เกี่ยวกับเรา');
+      await page.click('.popover [data-save]');
+      const o = await ev(() => { const a = __lai.canvas.getActiveObject(); return { op: a.opacity, link: a.link }; });
+      assert(Math.abs(o.op - 0.5) < 0.06 && /^https?:\/\/laistudio\.example/.test(o.link), JSON.stringify(o));
+      return JSON.stringify(o);
+    });
+    await step('ล็อก: ล็อกแล้วลากไม่ขยับ ลบไม่ได้ ปลดล็อกแล้วกลับมาใช้ได้', async () => {
+      const names0 = await ev(() => __lai.canvas.getObjects().map((o) => o.name || o.type));
+      await page.click('[data-ctx] [data-act="lock"]');
+      const i = await idxOf("o.type === 'rect' && !o.smart");
+      const p0 = await ev((i) => { const p = __lai.canvas.getObjects()[i].getCenterPoint(); return [Math.round(p.x), Math.round(p.y)]; }, i);
+      // a point of the rectangle that nothing else covers (it is at the back), as a person would grab it
+      const c = await ev((i) => {
+        const objs = __lai.canvas.getObjects(), o = objs[i]; o.setCoords(); const b = o.getBoundingRect();
+        const r = __lai.canvas.upperCanvasEl.getBoundingClientRect(), v = __lai.canvas.viewportTransform;
+        for (let fy = 0.1; fy < 0.95; fy += 0.08) for (let fx = 0.1; fx < 0.95; fx += 0.08) {
+          const P = { x: b.left + b.width * fx, y: b.top + b.height * fy };
+          if (!o.containsPoint(P)) continue;
+          if (objs.slice(i + 1).some((x) => x.visible && x.containsPoint(P))) continue;
+          return { x: r.left + P.x * v[0] + v[4], y: r.top + P.y * v[3] + v[5] };
+        }
+        return null;
+      }, i);
+      assert(c, 'no uncovered point on the rectangle');
+      await page.mouse.move(c.x, c.y); await page.mouse.down(); await page.mouse.move(c.x + 80, c.y + 40, { steps: 6 }); await page.mouse.up();
+      assert((await ev(() => __lai.canvas.getActiveObject()?.type)) === 'rect', 'clicking the locked rectangle did not select it');
+      await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Delete');
+      const r = await ev((i) => { const o = __lai.canvas.getObjects()[i]; const p = o.getCenterPoint(); return { p: [Math.round(p.x), Math.round(p.y)], type: o.type, locked: !!o.locked }; }, i);
+      const names1 = await ev(() => __lai.canvas.getObjects().map((o) => o.name || o.type));
+      assert(names1.join('|') === names0.join('|'), 'มีชิ้นอื่นหาย/เปลี่ยนตอนกดลบขณะเลือกชิ้นที่ล็อก: ' + JSON.stringify({ names0, names1 }));
+      assert(r.type === 'rect' && r.locked && r.p.join() === p0.join(), JSON.stringify({ p0, r }));
+      // still selected: the locked bar shows "ปลดล็อก"
+      await page.click('[data-ctx] [data-act="lock"]');
+      assert(!(await ev((i) => !!__lai.canvas.getObjects()[i].locked, i)), 'still locked');
+    });
+    await step('เลือกหลายชิ้น → จัดชิดซ้าย + เว้นระยะเท่ากันแนวตั้ง', async () => {
+      await page.keyboard.press('Escape');
+      const ids = await ev(() => __lai.canvas.getObjects().map((o, i) => [i, o.smart?.type]).filter(([, t]) => t === 'qr' || t === 'equation' || t === 'chart').map(([i]) => i));
+      await selectAt(ids[0]); for (const i of ids.slice(1)) await selectAt(i, 'Shift');
+      await page.click('[data-ctx] [data-act="align:left"]');
+      await page.click('[data-ctx] [data-act="distribute:v"]');
+      const r = await ev((ids) => ids.map((i) => { const o = __lai.canvas.getObjects()[i]; o.setCoords(); const b = o.getBoundingRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.height)]; }), ids);
+      const lefts = new Set(r.map((x) => x[0]));
+      const sorted = r.slice().sort((a, b) => a[1] - b[1]);
+      const gaps = sorted.slice(1).map((x, k) => x[1] - (sorted[k][1] + sorted[k][2]));
+      assert(lefts.size === 1 && Math.max(...gaps) - Math.min(...gaps) <= 2, JSON.stringify({ r, gaps }));
+      await page.keyboard.press('Escape');
+      return `ชิดซ้ายที่ x=${[...lefts][0]} ช่องห่าง ${gaps.join('/')}`;
+    });
+    await step('ภาพหน้าจอขั้น 7', async () => { await ev(() => { __lai.canvas.discardActiveObject(); __lai.canvas.requestRenderAll(); }); await page.screenshot({ path: path.join(OUT, 'stage7.png') }); });
+  }
+
   // ---------------------------------------------------------------- report
   await ev(() => __lai?.saveNow?.()).catch(() => {});
   const fails = results.filter((r) => !r.ok);
