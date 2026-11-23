@@ -727,6 +727,24 @@ const stage = (n, title) => { group = `${n}. ${title}`; console.log('\n' + group
       assert(r.cur === 1 && n === page1Objects, JSON.stringify({ r, n, page1Objects }));
       return `หน้า 2 มี ${n} ชิ้น`;
     });
+    await step('คลิกขวา: บนวัตถุ / หน้าว่าง / พื้นที่สีเทา / ภาพย่อหน้า — เมนูเบราว์เซอร์ไม่โผล่ เมนูโปรแกรมขึ้นแทน และทำสำเนาหน้าจากเมนูคลิกขวาได้', async () => {
+      await page.evaluate(() => { window.__ctx = []; if (!window.__ctxHook) { window.__ctxHook = 1; window.addEventListener('contextmenu', (e) => setTimeout(() => window.__ctx.push(e.defaultPrevented)), true); } });
+      const menu = () => page.evaluate(() => [...(document.querySelector('.popover .menu')?.querySelectorAll('[data-m]') || [])].map((x) => x.dataset.m));
+      const c = await centerOf(0);
+      const spots = [['วัตถุ', c], ['สีเทา', { x: (await screenOf(-30, -30)).x, y: (await screenOf(-30, -30)).y }]];
+      const seen = {};
+      for (const [k, pt] of spots) { await page.mouse.click(pt.x, pt.y, { button: 'right' }); await wait(250); seen[k] = await menu(); await page.keyboard.press('Escape'); }
+      await page.click('.page-thumb[data-page="1"]', { button: 'right' }); await wait(300);
+      seen['ภาพย่อ'] = await menu();
+      const prevented = await page.evaluate(() => window.__ctx.splice(0));
+      assert(prevented.length === 3 && prevented.every(Boolean), 'browser menu not blocked: ' + JSON.stringify({ prevented, seen }));
+      assert(seen['วัตถุ'].includes('duplicate') && seen['สีเทา'].includes('page-dup') && seen['ภาพย่อ'].includes('page-dup'), JSON.stringify(seen));
+      await page.click('.popover .menu [data-m="page-dup"]');
+      await page.waitForFunction(() => __lai.design.pages.length === 3);
+      await page.click('[data-act="page-del"]'); // back to 2 pages for the next steps
+      await page.waitForFunction(() => __lai.design.pages.length === 2);
+      return Object.entries(seen).map(([k, v]) => `${k}: ${v.length} คำสั่ง`).join(', ');
+    });
     await step('เพิ่มหน้าว่าง แล้วใส่เทมเพลต "ข้อเสนอโครงการ · วัตถุประสงค์" จากแผงเทมเพลต', async () => {
       await page.click('[data-act="page-add"]');
       await page.waitForFunction(() => __lai.design.pages.length === 3 && __lai.canvas.getObjects().length === 0);

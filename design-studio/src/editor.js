@@ -1288,6 +1288,16 @@ export class Editor {
 
   // ---------------------------------------------------------------- UI binding
   bindUI() {
+    // inside the editor the right-click menu is ours (like Canva), never the browser's — except in text fields
+    // (name box, search, dialogs) where people expect the browser's copy / paste menu
+    this.el.addEventListener('contextmenu', (e) => {
+      if (e.target.closest('input, textarea, [contenteditable="true"]')) return;
+      e.preventDefault();
+      const th = e.target.closest('.page-thumb[data-page]');
+      if (th) return this.showPageMenu(+th.dataset.page, e.clientX, e.clientY);
+      // the grey area around the page: the same menu as an empty spot on the page
+      if (e.target.matches('[data-ws], .canvas-wrap')) this.showContextMenu({ target: null, e: { clientX: e.clientX, clientY: e.clientY } });
+    });
     this.el.addEventListener('click', (e) => {
       const ev = e.target.closest('[data-el-view]');
       if (ev && this.el.contains(ev)) { this._elView = ev.dataset.elView; return this.renderPanel(); }
@@ -2627,16 +2637,19 @@ export class Editor {
   showContextMenu(e) {
     const t = e.target;
     if (t && !this.canvas.getActiveObjects().includes(t)) this.canvas.setActiveObject(t);
+    if (!t) this.canvas.discardActiveObject(); // right-click on an empty spot: menu for the page, like Canva
     this.canvas.requestRenderAll();
     const a = this.canvas.getActiveObject();
-    const anchor = h(`<div style="position:fixed;left:${e.e.clientX}px;top:${e.e.clientY}px;width:1px;height:1px"></div>`);
+    // pointer-events:none — the marker sits right under the mouse; it must not become the target of the browser's
+    // own "contextmenu" event (then the browser menu opened on top of ours)
+    const anchor = h(`<div style="position:fixed;left:${e.e.clientX}px;top:${e.e.clientY}px;width:1px;height:1px;pointer-events:none"></div>`);
     document.body.appendChild(anchor);
     const items = a
       ? [['copy', 'คัดลอก', 'Ctrl+C'], ['paste', 'วาง', 'Ctrl+V'], ['duplicate', 'ทำสำเนา', 'Ctrl+D'], ['delete', 'ลบ', 'Del'], ['-'],
          ['arrange:front', 'นำไปไว้บนสุด'], ['arrange:forward', 'เลื่อนขึ้น'], ['arrange:backward', 'เลื่อนลง'], ['arrange:back', 'ส่งไปไว้ล่างสุด'], ['-'],
          [a.type === 'activeselection' ? 'group' : a.type === 'group' ? 'ungroup' : null, a.type === 'activeselection' ? 'จัดกลุ่ม' : 'ยกเลิกกลุ่ม'],
          ['copy-style', 'คัดลอกสไตล์'], ['lock', a.locked ? 'ปลดล็อก' : 'ล็อก']].filter((x) => x[0] !== null)
-      : [['paste', 'วาง', 'Ctrl+V'], ['selectall', 'เลือกทั้งหมด', 'Ctrl+A'], ['-'], ['page-add', 'เพิ่มหน้าใหม่']];
+      : [['paste', 'วาง', 'Ctrl+V'], ['selectall', 'เลือกทั้งหมด', 'Ctrl+A'], ['-'], ...this.pageMenuItems()];
     const el = popover(anchor, `<div class="menu">${items.map(([k, l, s]) => (k === '-' ? '<hr>' : `<button data-m="${k}">${l}${s ? `<kbd>${s}</kbd>` : ''}</button>`)).join('')}</div>`, { key: 'ctx', onClose: () => anchor.remove() });
     el.onclick = (ev) => {
       const m = ev.target.closest('[data-m]')?.dataset.m;
@@ -2645,8 +2658,42 @@ export class Editor {
       if (m === 'copy') this.copy();
       else if (m === 'paste') this.paste();
       else if (m === 'selectall') this.selectAll();
-      else if (m === 'page-add') this.addPage();
+      else if (m.startsWith('page-')) this.pageAction(m);
       else this.ctxAction(m);
+    };
+  }
+
+  /** Page commands for the right-click menus (on the page and on its thumbnail). */
+  pageMenuItems() {
+    const n = this.design.pages.length, p = this.design.pages[this.cur];
+    return [['page-dup', 'ทำสำเนาหน้านี้'], ['page-add', 'เพิ่มหน้าใหม่'], ['-'],
+      ...(this.cur > 0 ? [['page-left', 'เลื่อนหน้าไปทางซ้าย']] : []), ...(this.cur < n - 1 ? [['page-right', 'เลื่อนหน้าไปทางขวา']] : []),
+      ['page-hide', p && p.hidden ? 'แสดงหน้านี้' : 'ซ่อนหน้านี้'], ['page-notes', 'ชื่อหน้าและโน้ต'], ['-'],
+      ...(n > 1 ? [['page-del', 'ลบหน้านี้']] : [])];
+  }
+
+  pageAction(m) {
+    if (m === 'page-add') return this.addPage();
+    if (m === 'page-dup') return this.duplicatePage();
+    if (m === 'page-del') return this.deletePage();
+    if (m === 'page-left') return this.movePage(-1);
+    if (m === 'page-right') return this.movePage(1);
+    if (m === 'page-hide') return this.togglePageHidden();
+    if (m === 'page-notes') return this.openPageNotes();
+  }
+
+  /** Right-click on a page thumbnail: go to that page and show the page menu there. */
+  async showPageMenu(i, x, y) {
+    if (i !== this.cur) await this.gotoPage(i);
+    const anchor = h(`<div style="position:fixed;left:${x}px;top:${y}px;width:1px;height:1px;pointer-events:none"></div>`);
+    document.body.appendChild(anchor);
+    const items = this.pageMenuItems();
+    const el = popover(anchor, `<div class="menu">${items.map(([k, l]) => (k === '-' ? '<hr>' : `<button data-m="${k}">${l}</button>`)).join('')}</div>`, { key: 'ctx', onClose: () => anchor.remove() });
+    el.onclick = (ev) => {
+      const m = ev.target.closest('[data-m]')?.dataset.m;
+      if (!m) return;
+      closePopover();
+      this.pageAction(m);
     };
   }
 
