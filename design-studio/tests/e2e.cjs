@@ -2162,7 +2162,10 @@ function meanDiff(a, b) {
   await step('[A1] ไม้บรรทัด + ลากเส้นไกด์ (สร้าง ย้าย ลบ) + วัตถุสแนปกับไกด์ + แสดงระยะตัดตก', async () => {
     await page.keyboard.press('Shift+R');
     await page.waitForSelector('.ws-area.rulers .ruler-h', { state: 'visible' });
-    const cr = await page.locator('.upper-canvas').boundingBox();
+    // page origin on screen (the drawing surface has a margin around the page)
+    const cr0 = await page.locator('.upper-canvas').boundingBox();
+    const off = await ev(() => __lai.canvas.viewportTransform.slice(4, 6));
+    const cr = { x: cr0.x + off[0], y: cr0.y + off[1] };
     const z = await ev(() => __lai.zoom);
     const rh = await page.locator('[data-ruler-h]').boundingBox();
     const rv = await page.locator('[data-ruler-v]').boundingBox();

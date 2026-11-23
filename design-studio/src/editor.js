@@ -177,7 +177,7 @@ export class Editor {
               <canvas class="ruler-v" data-ruler-v title="ลากออกมาเพื่อสร้างเส้นไกด์แนวตั้ง"></canvas>
               <div class="ruler-corner" title="ดับเบิลคลิกเพื่อล้างเส้นไกด์"></div>
               <div class="workspace" data-ws>
-                <div class="canvas-wrap" data-wrap><canvas data-canvas></canvas></div>
+                <div class="canvas-wrap" data-wrap><div class="page-shadow" data-page-shadow></div><canvas data-canvas></canvas></div>
               </div>
             </div>
             <footer class="pagebar">
@@ -208,6 +208,8 @@ export class Editor {
 
     const canvas = new Canvas(this.$('[data-canvas]'), {
       preserveObjectStacking: true,
+      // handles are drawn after the page clip, so they show (and can be grabbed) in the margin around the page
+      controlsAboveOverlay: true,
       stopContextMenu: true,
       fireRightClick: true,
       selectionColor: 'rgba(124,92,255,0.08)',
@@ -340,11 +342,49 @@ export class Editor {
         if (ph && ph.placeholder) return this.pickReplaceImage();
         return this.startDecoCrop(t);
       }
+      // a text inside an ordinary group: edit it in place, like Canva (no need to ungroup first)
+      const inner = t.type === 'group' && !t.smart && !t.shapeText && !t.graphic ? this.groupTextAt(t, e.e) : null;
+      if (inner) return this.editTextInGroup(t, inner);
       if (t.smart) this.openSmartEditor(t);
       else if (t.shapeText || this.canHoldText(t)) this.editShapeText(t);
       else if (isImage(t) && t.placeholder) this.pickReplaceImage();
       else if (isImage(t)) this.startCrop(t);
     });
+  }
+
+  /** The text box of a group under the mouse (top-most first), if any. */
+  groupTextAt(g, ev) {
+    const p = this.canvas.getScenePoint(ev);
+    const kids = g.getObjects().slice().reverse();
+    for (const o of kids) {
+      if (!/text/i.test(o.type) || !o.visible) continue;
+      const local = util.transformPoint(p, util.invertTransform(o.calcTransformMatrix()));
+      if (Math.abs(local.x) <= o.width / 2 + 2 && Math.abs(local.y) <= o.height / 2 + 2) return o;
+    }
+    return null;
+  }
+
+  /** Take the text out of its group while it is typed in, then put it back at the same place and layer. */
+  editTextInGroup(g, t) {
+    const c = this.canvas;
+    const idx = g.getObjects().indexOf(t);
+    g.remove(t); // keeps its place on the page
+    c.add(t);
+    c.setActiveObject(t);
+    t.enterEditing();
+    t.selectAll();
+    c.requestRenderAll();
+    const back = () => {
+      t.off('editing:exited', back);
+      c.remove(t);
+      if (!c.getObjects().includes(g)) { c.add(t); this.commit(); return; }
+      g.insertAt(idx, t);
+      g.setCoords();
+      c.setActiveObject(g);
+      c.requestRenderAll();
+      this.commit();
+    };
+    t.on('editing:exited', back);
   }
 
   // ---------------------------------------------------------------- drag-to-crop on canvas
@@ -1131,7 +1171,7 @@ export class Editor {
         // with a document setup the thumbnail also shows header/footer/watermark (drawn outside the objects)
         if (hasDoc(this.design)) { pageThumb(this.design, p, 200).then((u) => { this.thumbs.set(p.id, u); this.renderPages(); }).catch(() => {}); if (this.cur === 0) this.scheduleSave(); return; }
         const m = 200 / (this.W * this.zoom);
-        this.thumbs.set(p.id, this.canvas.toDataURL({ format: 'jpeg', quality: 0.75, multiplier: m }));
+        this.thumbs.set(p.id, this.canvas.toDataURL({ format: 'jpeg', quality: 0.75, multiplier: m, left: this.pad, top: this.pad, width: this.W * this.zoom, height: this.H * this.zoom }));
         this.renderPages();
         if (this.cur === 0) this.scheduleSave();
       } catch (e) { /* tainted canvas etc. */ }
@@ -1212,10 +1252,20 @@ export class Editor {
   }
 
   // ---------------------------------------------------------------- zoom
+  /** Room (screen px) around the page inside the drawing surface: handles of things hanging off the page stay grabbable. */
+  get pad() { return window.innerWidth < 760 ? 12 : 36; }
+
   setZoom(z) {
     this.zoom = Math.max(0.05, Math.min(4, z));
-    this.canvas.setDimensions({ width: Math.round(this.W * this.zoom), height: Math.round(this.H * this.zoom) });
-    this.canvas.setZoom(this.zoom);
+    const M = this.pad;
+    this.canvas.setDimensions({ width: Math.round(this.W * this.zoom) + 2 * M, height: Math.round(this.H * this.zoom) + 2 * M });
+    this.canvas.setViewportTransform([this.zoom, 0, 0, this.zoom, M, M]);
+    // only the page shows its content (like the paper in Canva); the margin around it stays grey
+    if (!this.canvas.clipPath || this.canvas.clipPath.width !== this.W || this.canvas.clipPath.height !== this.H) {
+      this.canvas.clipPath = new Rect({ left: 0, top: 0, width: this.W, height: this.H, originX: 'left', originY: 'top', absolutePositioned: true, excludeFromExport: true });
+    }
+    const sh = this.$('[data-page-shadow]');
+    if (sh) Object.assign(sh.style, { left: M + 'px', top: M + 'px', width: Math.round(this.W * this.zoom) + 'px', height: Math.round(this.H * this.zoom) + 'px' });
     this.canvas.calcOffset();
     const zl = this.$('[data-zoom]');
     if (zl) zl.textContent = Math.round(this.zoom * 100) + '%';
@@ -1315,7 +1365,42 @@ export class Editor {
       }
     }, { passive: false });
     ws.addEventListener('mousedown', (e) => {
-      if (e.target === ws || e.target.classList.contains('canvas-wrap')) { this.canvas.discardActiveObject(); this.canvas.requestRenderAll(); }
+      if (!(e.target === ws || e.target.classList.contains('canvas-wrap'))) return;
+      // like Canva: a selection box can start in the grey area around the page
+      const keep = e.shiftKey && this.canvas.getActiveObject() ? (this.canvas.getActiveObject().getObjects?.() || [this.canvas.getActiveObject()]) : [];
+      if (!e.shiftKey) { this.canvas.discardActiveObject(); this.canvas.requestRenderAll(); }
+      if (e.button !== 0 || this._crop || this.canvas.isDrawingMode) return;
+      const x0 = e.clientX, y0 = e.clientY;
+      const box = document.createElement('div');
+      box.className = 'ws-marquee';
+      let moved = false;
+      const move = (ev) => {
+        const x = Math.min(x0, ev.clientX), y = Math.min(y0, ev.clientY), w = Math.abs(ev.clientX - x0), h = Math.abs(ev.clientY - y0);
+        if (!moved && w + h < 5) return;
+        if (!moved) { moved = true; document.body.appendChild(box); }
+        Object.assign(box.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' });
+      };
+      const up = (ev) => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+        box.remove();
+        if (!moved) return;
+        const c = this.canvas, r = c.upperCanvasEl.getBoundingClientRect(), v = c.viewportTransform;
+        const toScene = (px, py) => ({ x: (px - r.left - v[4]) / v[0], y: (py - r.top - v[5]) / v[3] });
+        const a = toScene(Math.min(x0, ev.clientX), Math.min(y0, ev.clientY)), b = toScene(Math.max(x0, ev.clientX), Math.max(y0, ev.clientY));
+        const hit = c.getObjects().filter((o) => {
+          if (!o.visible || !o.selectable || !o.evented || o.excludeFromExport || o.locked) return false;
+          o.setCoords();
+          const bb = o.getBoundingRect();
+          return bb.left < b.x && bb.left + bb.width > a.x && bb.top < b.y && bb.top + bb.height > a.y;
+        });
+        const objs = [...new Set([...keep, ...hit])];
+        if (!objs.length) return;
+        c.setActiveObject(objs.length === 1 ? objs[0] : new ActiveSelection(objs, { canvas: c }));
+        c.requestRenderAll();
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
     });
     this.on(window, 'resize', () => {
       clearTimeout(this._rz);

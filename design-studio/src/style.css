@@ -211,8 +211,9 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); }
 
 /* workspace */
 .workspace { flex: 1; overflow: auto; display: flex; min-height: 0; position: relative; }
-.canvas-wrap { margin: auto; padding: 36px; }
-.canvas-wrap .canvas-container { box-shadow: 0 2px 14px rgba(20, 22, 40, 0.18); }
+.canvas-wrap { margin: auto; position: relative; }
+/* the drawing surface has a margin around the page (see Editor.pad); the shadow marks the paper */
+.canvas-wrap .page-shadow { position: absolute; box-shadow: 0 2px 14px rgba(20, 22, 40, 0.18); pointer-events: none; }
 .workspace.drop { outline: 3px dashed var(--accent); outline-offset: -10px; }
 .workspace.drawing .upper-canvas { cursor: crosshair !important; }
 
@@ -384,7 +385,7 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
   .pagebar { height: 64px; gap: 4px; }
   .page-actions .icon-btn:nth-child(-n + 2) { display: none; }
   .zoom .icon-btn { display: none; }
-  .canvas-wrap { padding: 12px; }
+  .canvas-wrap { padding: 0; }
   .fmt-grid { grid-template-columns: 1fr 1fr; }
   .toast-root { bottom: 150px; }
 }
@@ -684,3 +685,6 @@ kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius
 /* format cards never force the dialog wider than a small phone */
 .fmt { min-width: 0; } .fmt b, .fmt small { overflow-wrap: anywhere; }
 .chips { display: flex; gap: 6px; overflow-x: auto; padding: 8px 0; scrollbar-width: thin; } .chips .chip { flex: 0 0 auto; }
+
+/* selection box started in the grey area around the page */
+.ws-marquee { position: fixed; z-index: 30; pointer-events: none; border: 1px solid #7c3aed; background: rgba(124, 58, 237, 0.08); border-radius: 2px; }

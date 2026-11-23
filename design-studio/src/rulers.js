@@ -52,14 +52,15 @@ export const rulers = {
       const z = this.zoom;
       const r = this.canvas.lowerCanvasEl.getBoundingClientRect();
       const g = this.pageGuides();
-      const alongX = (e.clientX - r.left) / z, alongY = (e.clientY - r.top) / z;
+      const M = this.pad;
+      const alongX = (e.clientX - r.left - M) / z, alongY = (e.clientY - r.top - M) / z;
       let axis = ruler === 'top' ? 'h' : 'v';
       const markAxis = ruler === 'top' ? 'v' : 'h';
       const along = ruler === 'top' ? alongX : alongY;
       const hit = g[markAxis].findIndex((p) => Math.abs(p - along) * z < 6);
       const lists = { h: [...g.h], v: [...g.v] };
       if (hit >= 0) { axis = markAxis; lists[axis].splice(hit, 1); }
-      const posOf = (ev) => (axis === 'h' ? (ev.clientY - r.top) / z : (ev.clientX - r.left) / z);
+      const posOf = (ev) => (axis === 'h' ? (ev.clientY - r.top - M) / z : (ev.clientX - r.left - M) / z);
       this.dragGuide = { axis, pos: posOf(e) };
       const move = (ev) => { this.dragGuide.pos = posOf(ev); this.canvas.requestRenderAll(); this.drawRulers(); };
       const up = (ev) => {
@@ -104,7 +105,7 @@ export const rulers = {
       c.scale(dpr, dpr);
       c.fillStyle = bg;
       c.fillRect(0, 0, r.width, r.height);
-      const origin = dir === 'x' ? cr.left - r.left : cr.top - r.top;
+      const origin = (dir === 'x' ? cr.left - r.left : cr.top - r.top) + this.pad;
       const len = dir === 'x' ? r.width : r.height;
       const pageLen = (dir === 'x' ? this.W : this.H) * z;
       c.fillStyle = 'rgba(124,92,255,0.12)';
