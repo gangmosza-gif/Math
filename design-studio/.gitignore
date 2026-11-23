@@ -5,3 +5,5 @@ tests/report
 tests/report-office
 samples
 tests/report-docs
+dist-offline
+tests/report-journey
